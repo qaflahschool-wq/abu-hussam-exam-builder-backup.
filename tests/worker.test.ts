@@ -225,3 +225,64 @@ test('Worker login rejects a wrong bcrypt password without issuing a session', a
   const body = await response.json() as Record<string, unknown>;
   assert.equal('token' in body, false);
 });
+
+test('Worker owner approval creates an active user through a D1 batch', async () => {
+  const owner = { id: 'owner-approval', username: 'platform.owner', role: 'PlatformOwner', status: 'ACTIVE', name: 'Platform Owner', authVersion: 0 };
+  const pending = {
+    id: 'reg-pending-1',
+    fullName: 'New Teacher',
+    username: 'new.teacher',
+    requestedRole: 'Teacher',
+    assignedSubjects: ['subj-en'],
+    assignedGrades: ['Grade 7'],
+    status: 'PENDING_APPROVAL',
+    passwordHash: '$2b$10$abcdefghijklmnopqrstuv123456789012345678901234567890',
+    createdAt: '2026-11-20T00:00:00.000Z',
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  };
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(..._values: unknown[]) { return this; },
+        async first<T>() {
+          if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+          if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(owner) } as T;
+          if (sql.includes('FROM registration_requests WHERE id =')) return { record_json: JSON.stringify(pending) } as T;
+          if (sql.includes('SELECT id FROM app_users WHERE username =')) return null;
+          if (sql.includes('FROM school_settings')) return null;
+          return null;
+        },
+        async all<T>() {
+          if (sql.includes('FROM subjects')) {
+            return { success: true, results: [{ record_json: JSON.stringify({ id: 'subj-en' }) }] as T[] };
+          }
+          return { success: true, results: [] as T[] };
+        },
+        async run() { return { success: true, meta: { changes: 1 } }; },
+      };
+    },
+    async batch(_statements: unknown[]) {
+      return [
+        { success: true, meta: { changes: 1 } },
+        { success: true, meta: { changes: 1 } },
+      ];
+    },
+  };
+  const token = await signWorkerAuthToken({ id: owner.id, role: owner.role }, SECRET, {
+    getAuthVersion: async () => 0,
+  }, 3600);
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/owner/registration-requests/reg-pending-1/approve', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'Teacher', assignedSubjects: ['subj-en'], assignedGrades: ['Grade 7'] }),
+    }),
+    { DB: db as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { user: Record<string, unknown>; request: Record<string, unknown> };
+  assert.equal(body.user.username, 'new.teacher');
+  assert.equal(body.user.status, 'ACTIVE');
+  assert.equal('passwordHash' in body.user, false);
+  assert.equal(body.request.status, 'APPROVED');
+});
