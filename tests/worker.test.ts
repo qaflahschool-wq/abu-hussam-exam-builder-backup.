@@ -32,7 +32,7 @@ function database(record: typeof user | null, version = 0) {
 }
 
 test('Worker health endpoint is available without database credentials', async () => {
-  const response = await worker.fetch(new Request('https://worker.test/api/worker/health'), {} as never, {} as never);
+  const response = await worker.fetch(new Request('https://worker.test/api/worker/health'), {} as never);
   assert.equal(response.status, 200);
   assert.equal((await response.json() as { runtime: string }).runtime, 'cloudflare-workers');
 });
@@ -45,7 +45,6 @@ test('Worker auth/me returns a redacted current user for a valid token', async (
   const response = await worker.fetch(
     new Request('https://worker.test/api/worker/auth/me', { headers: { authorization: `Bearer ${token}` } }),
     { DB: db as never, SESSION_SECRET: SECRET },
-    {} as never
   );
   assert.equal(response.status, 200);
   const body = await response.json() as { user: Record<string, unknown> };
@@ -58,7 +57,6 @@ test('Worker auth/me rejects missing token', async () => {
   const response = await worker.fetch(
     new Request('https://worker.test/api/worker/auth/me'),
     { DB: database(user) as never, SESSION_SECRET: SECRET },
-    {} as never
   );
   assert.equal(response.status, 401);
 });
@@ -67,7 +65,6 @@ test('Worker auth/me fails closed when secret is not configured', async () => {
   const response = await worker.fetch(
     new Request('https://worker.test/api/worker/auth/me'),
     { DB: database(user) as never, SESSION_SECRET: 'short' },
-    {} as never
   );
   assert.equal(response.status, 503);
 });
