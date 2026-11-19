@@ -274,10 +274,22 @@ export const ManualExamWizardModal: React.FC<ManualExamWizardModalProps> = ({ on
 
   const handleWizardImageUpload = async (qId: string, file: File) => {
     try {
+      if (!user?.id) throw new Error('يجب تسجيل الدخول قبل رفع الصور.');
+      const question = step2Questions.find((item) => item.id === qId);
+      if (!question) throw new Error('تعذر تحديد السؤال المطلوب.');
       const imageDataUrl = await prepareQuestionImage(file);
-      updateWizardQuestion(qId, { imageDataUrl, imageWidthPercent: 60, keepTogether: true });
+      const uploaded = await api.uploadQuestionImage(qId, imageDataUrl);
+      if (question.imageStorageId) {
+        await api.deleteQuestionImage(question.imageStorageId).catch(() => undefined);
+      }
+      updateWizardQuestion(qId, {
+        imageDataUrl: undefined,
+        imageStorageId: uploaded.image.id,
+        imageWidthPercent: question.imageWidthPercent || 60,
+        keepTogether: true,
+      });
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'تعذر رفع الصورة.');
+      window.alert(error instanceof Error ? error.message : 'تعذر رفع الصورة إلى التخزين الآمن.');
     }
   };
 
