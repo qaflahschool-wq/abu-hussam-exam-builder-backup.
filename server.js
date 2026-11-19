@@ -1,8 +1,8 @@
 // server.ts
+import "dotenv/config";
 import fs4 from "fs";
 import express2 from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import path4 from "path";
 import { fileURLToPath } from "url";
 
@@ -756,10 +756,15 @@ var Database = class {
   }
   ensureDirs() {
     if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.mkdirSync(DATA_DIR, { recursive: true, mode: 448 });
     }
     if (!fs.existsSync(BACKUP_DIR)) {
-      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+      fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 448 });
+    }
+    try {
+      fs.chmodSync(DATA_DIR, 448);
+      fs.chmodSync(BACKUP_DIR, 448);
+    } catch {
     }
   }
   loadData() {
@@ -913,7 +918,13 @@ var Database = class {
             modified = true;
           }
           const salt2 = bcrypt.genSaltSync(10);
-          if (!parsed.users.some((u) => u.id === "usr-school-admin" || u.role === "SchoolAdmin")) {
+          const isProduction2 = process.env.NODE_ENV === "production";
+          const bootstrapSchoolAdminPassword = process.env.BOOTSTRAP_SCHOOL_ADMIN_PASSWORD || (isProduction2 ? "" : "school123");
+          const bootstrapTeacherPassword = process.env.BOOTSTRAP_TEACHER_PASSWORD || (isProduction2 ? "" : "teacher123");
+          if (isProduction2 && [bootstrapSchoolAdminPassword, bootstrapTeacherPassword].some((value) => value && value.length < 12)) {
+            throw new Error("Production bootstrap passwords must be at least 12 characters.");
+          }
+          if (bootstrapSchoolAdminPassword && !parsed.users.some((u) => u.id === "usr-school-admin" || u.role === "SchoolAdmin")) {
             parsed.users.push({
               id: "usr-school-admin",
               username: "schooladmin",
@@ -925,11 +936,11 @@ var Database = class {
               email: "admin@qaflah.edu.ye",
               school: "\u0645\u062F\u0631\u0633\u0629 \u0642\u0641\u0644\u0629 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0623\u0633\u0627\u0633\u064A",
               createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-              passwordHash: bcrypt.hashSync("school123", salt2)
+              passwordHash: bcrypt.hashSync(bootstrapSchoolAdminPassword, salt2)
             });
             modified = true;
           }
-          if (!parsed.users.some((u) => u.id === "usr-teacher-2")) {
+          if (bootstrapTeacherPassword && !parsed.users.some((u) => u.id === "usr-teacher-2")) {
             parsed.users.push({
               id: "usr-teacher-2",
               username: "teacher2",
@@ -941,7 +952,7 @@ var Database = class {
               email: "fatima@qaflah.edu.ye",
               school: "\u0645\u062F\u0631\u0633\u0629 \u0642\u0641\u0644\u0629 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0623\u0633\u0627\u0633\u064A",
               createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-              passwordHash: bcrypt.hashSync("teacher123", salt2)
+              passwordHash: bcrypt.hashSync(bootstrapTeacherPassword, salt2)
             });
             modified = true;
           }
@@ -998,18 +1009,55 @@ var Database = class {
             }
           });
         }
+        if (process.env.NODE_ENV === "production" && Array.isArray(parsed.users)) {
+          const legacyAccounts = [
+            { username: "admin", password: "admin123", env: "BOOTSTRAP_OWNER_PASSWORD", required: true },
+            { username: "schooladmin", password: "school123", env: "BOOTSTRAP_SCHOOL_ADMIN_PASSWORD", required: false },
+            { username: "teacher", password: "teacher123", env: "BOOTSTRAP_TEACHER_PASSWORD", required: false },
+            { username: "teacher2", password: "teacher123", env: "BOOTSTRAP_TEACHER2_PASSWORD", required: false }
+          ];
+          for (const legacy of legacyAccounts) {
+            const account = parsed.users.find(
+              (u) => String(u.username || "").toLowerCase() === legacy.username
+            );
+            if (!account?.passwordHash || !bcrypt.compareSync(legacy.password, account.passwordHash)) continue;
+            const replacement = process.env[legacy.env];
+            if (replacement && replacement.length >= 12) {
+              account.passwordHash = bcrypt.hashSync(replacement, 10);
+              modified = true;
+            } else if (legacy.required) {
+              throw new Error("The production owner account still uses a demo password. Configure BOOTSTRAP_OWNER_PASSWORD to rotate it.");
+            } else if (account.status !== "SUSPENDED") {
+              account.status = "SUSPENDED";
+              modified = true;
+            }
+          }
+        }
         if (modified) {
           this.saveDataDirect(parsed);
         }
         return parsed;
       } catch (err) {
-        console.error("Error reading database file, loading default seeds:", err);
+        console.error("Database load or migration failed:", err);
+        if (process.env.NODE_ENV === "production") {
+          const reason = err instanceof Error ? err.message : "unknown database error";
+          throw new Error(`Production database load failed: ${reason}. Refusing to replace existing data with a fresh seed database.`);
+        }
       }
     }
+    const isProduction = process.env.NODE_ENV === "production";
+    const ownerPassword = process.env.BOOTSTRAP_OWNER_PASSWORD || (isProduction ? "" : "admin123");
+    if (ownerPassword.length < 12 && isProduction) {
+      throw new Error("BOOTSTRAP_OWNER_PASSWORD must be configured (at least 12 characters) before first production startup.");
+    }
+    const schoolAdminPassword = process.env.BOOTSTRAP_SCHOOL_ADMIN_PASSWORD || (isProduction ? "" : "school123");
+    const teacherPassword = process.env.BOOTSTRAP_TEACHER_PASSWORD || (isProduction ? "" : "teacher123");
+    const teacher2Password = process.env.BOOTSTRAP_TEACHER2_PASSWORD || (isProduction ? "" : teacherPassword);
+    if (isProduction && [schoolAdminPassword, teacherPassword, teacher2Password].some((value) => value && value.length < 12)) {
+      throw new Error("Production bootstrap passwords must be at least 12 characters.");
+    }
     const salt = bcrypt.genSaltSync(10);
-    const adminHash = bcrypt.hashSync("admin123", salt);
-    const schoolAdminHash = bcrypt.hashSync("school123", salt);
-    const teacherHash = bcrypt.hashSync("teacher123", salt);
+    const adminHash = bcrypt.hashSync(ownerPassword, salt);
     const initialDb = {
       users: [
         {
@@ -1026,7 +1074,7 @@ var Database = class {
           createdAt: (/* @__PURE__ */ new Date()).toISOString(),
           passwordHash: adminHash
         },
-        {
+        ...schoolAdminPassword ? [{
           id: "usr-school-admin",
           username: "schooladmin",
           name: "\u0625\u062F\u0627\u0631\u0629 \u0645\u062F\u0631\u0633\u0629 \u0642\u0641\u0644\u0629 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0623\u0633\u0627\u0633\u064A",
@@ -1044,9 +1092,9 @@ var Database = class {
           email: "admin@qaflah.edu.ye",
           school: "\u0645\u062F\u0631\u0633\u0629 \u0642\u0641\u0644\u0629 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0623\u0633\u0627\u0633\u064A",
           createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-          passwordHash: schoolAdminHash
-        },
-        {
+          passwordHash: bcrypt.hashSync(schoolAdminPassword, salt)
+        }] : [],
+        ...teacherPassword ? [{
           id: "usr-teacher",
           username: "teacher",
           name: "\u0623. \u0645\u062D\u0645\u062F (\u0645\u0639\u0644\u0645 \u0627\u0644\u0644\u063A\u0629 \u0627\u0644\u0625\u0646\u062C\u0644\u064A\u0632\u064A\u0629)",
@@ -1058,9 +1106,9 @@ var Database = class {
           email: "teacher.english@qaflah.edu.ye",
           school: "\u0645\u062F\u0631\u0633\u0629 \u0642\u0641\u0644\u0629 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0623\u0633\u0627\u0633\u064A",
           createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-          passwordHash: teacherHash
-        },
-        {
+          passwordHash: bcrypt.hashSync(teacherPassword, salt)
+        }] : [],
+        ...teacher2Password ? [{
           id: "usr-teacher-2",
           username: "teacher2",
           name: "\u0623. \u0641\u0627\u0637\u0645\u0629 (\u0645\u0639\u0644\u0645\u0629 \u0627\u0644\u0645\u0648\u0627\u062F \u0627\u0644\u0623\u0633\u0627\u0633\u064A\u0629)",
@@ -1072,8 +1120,8 @@ var Database = class {
           email: "fatima@qaflah.edu.ye",
           school: "\u0645\u062F\u0631\u0633\u0629 \u0642\u0641\u0644\u0629 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0623\u0633\u0627\u0633\u064A",
           createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-          passwordHash: teacherHash
-        }
+          passwordHash: bcrypt.hashSync(teacher2Password, salt)
+        }] : []
       ],
       registrationRequests: [],
       notifications: [],
@@ -1120,7 +1168,11 @@ var Database = class {
   saveDataDirect(data) {
     try {
       const tempPath = `${DB_FILE}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf-8");
+      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 384 });
+      try {
+        fs.chmodSync(tempPath, 384);
+      } catch {
+      }
       fs.renameSync(tempPath, DB_FILE);
     } catch (err) {
       console.error("Failed to save database atomically:", err);
@@ -1131,7 +1183,10 @@ var Database = class {
   }
   // Users
   getUsers() {
-    return this.data.users.map(({ passwordHash, ...user }) => user);
+    return this.data.users.map((storedUser) => {
+      const { passwordHash, authVersion: _authVersion, ...safeUser } = storedUser;
+      return safeUser;
+    });
   }
   findUserByUsername(username) {
     return this.data.users.find((u) => u.username.toLowerCase() === username.toLowerCase());
@@ -1139,8 +1194,15 @@ var Database = class {
   findUserById(id) {
     const user = this.data.users.find((u) => u.id === id);
     if (!user) return void 0;
-    const { passwordHash, ...rest } = user;
+    const { passwordHash, authVersion: _authVersion, ...rest } = user;
     return rest;
+  }
+  getAuthVersion(userId) {
+    const user = this.data.users.find((u) => u.id === userId);
+    return Number.isSafeInteger(user?.authVersion) && user?.authVersion >= 0 ? user?.authVersion : 0;
+  }
+  isAuthVersionCurrent(userId, version) {
+    return this.getAuthVersion(userId) === version;
   }
   recordUserLoginSuccess(userId) {
     const idx = this.data.users.findIndex((u) => u.id === userId);
@@ -1190,8 +1252,8 @@ var Database = class {
       role: safeRole,
       status: user.status || "ACTIVE",
       hasAIAccess: safeRole === "PlatformOwner" ? Boolean(user.hasAIAccess) : false,
-      assignedSubjects: user.assignedSubjects || this.getSubjects().map((s) => s.id),
-      assignedGrades: user.assignedGrades || [...ALL_BASIC_GRADES],
+      assignedSubjects: safeRole === "Teacher" ? Array.isArray(user.assignedSubjects) ? user.assignedSubjects : [] : ["all"],
+      assignedGrades: safeRole === "Teacher" ? Array.isArray(user.assignedGrades) ? user.assignedGrades : [] : ["all"],
       email: user.email,
       phone: user.phone,
       school: user.school || this.data.schoolSettings?.schoolNameAr || "\u0645\u062F\u0631\u0633\u0629 \u0642\u0641\u0644\u0629 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0623\u0633\u0627\u0633\u064A",
@@ -1229,13 +1291,15 @@ var Database = class {
     }
     this.data.users[idx] = next;
     this.save();
-    const { passwordHash: _, ...rest } = next;
+    const { passwordHash: _, authVersion: _authVersion, ...rest } = next;
     return rest;
   }
   updateUserPassword(userId, newPassword) {
     const user = this.data.users.find((u) => u.id === userId);
     if (!user) return false;
     user.passwordHash = bcrypt.hashSync(newPassword, 10);
+    const versionedUser = user;
+    versionedUser.authVersion = (Number.isSafeInteger(versionedUser.authVersion) ? versionedUser.authVersion : 0) + 1;
     this.save();
     return true;
   }
@@ -1826,7 +1890,11 @@ var Database = class {
   createBackup() {
     const filename = `backup-qaflah-${Date.now()}.json`;
     const filepath = path.join(BACKUP_DIR, filename);
-    fs.writeFileSync(filepath, JSON.stringify(this.data, null, 2), "utf-8");
+    fs.writeFileSync(filepath, JSON.stringify(this.data, null, 2), { encoding: "utf-8", mode: 384 });
+    try {
+      fs.chmodSync(filepath, 384);
+    } catch {
+    }
     return filename;
   }
   listBackups() {
@@ -3882,7 +3950,6 @@ async function exportExamHtmlToPdf(options) {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
-      "--allow-file-access-from-files",
       "--font-render-hinting=none",
       `--user-data-dir=${tmpProfileDir}`,
       "--print-to-pdf-no-header",
@@ -3927,8 +3994,7 @@ import path3 from "path";
 
 // server/security.ts
 function getClientMeta(req) {
-  const xff = req.headers["x-forwarded-for"];
-  let ip = typeof xff === "string" ? xff.split(",")[0].trim() : Array.isArray(xff) && xff.length > 0 ? xff[0].trim() : req.ip || req.socket?.remoteAddress || "unknown";
+  let ip = req.ip || req.socket?.remoteAddress || "unknown";
   if (ip.startsWith("::ffff:")) {
     ip = ip.slice(7);
   }
@@ -4053,15 +4119,32 @@ function recordSecurityEvent(params) {
 var DATA_DIR2 = path3.resolve(process.cwd(), "data");
 var SECRET_FILE = path3.join(DATA_DIR2, "session.secret");
 function getSessionSecret() {
-  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 16) {
+  if (process.env.SESSION_SECRET) {
+    const minimumLength = process.env.NODE_ENV === "production" ? 32 : 16;
+    if (process.env.SESSION_SECRET.length < minimumLength) {
+      throw new Error(`SESSION_SECRET must be at least ${minimumLength} characters.`);
+    }
     return process.env.SESSION_SECRET;
   }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET must be explicitly configured in production; refusing to generate a session key on an ephemeral or misconfigured server.");
+  }
   if (!fs3.existsSync(DATA_DIR2)) {
-    fs3.mkdirSync(DATA_DIR2, { recursive: true });
+    fs3.mkdirSync(DATA_DIR2, { recursive: true, mode: 448 });
+  }
+  try {
+    fs3.chmodSync(DATA_DIR2, 448);
+  } catch {
   }
   if (fs3.existsSync(SECRET_FILE)) {
     const existing = fs3.readFileSync(SECRET_FILE, "utf-8").trim();
-    if (existing.length >= 32) return existing;
+    if (existing.length >= 32) {
+      try {
+        fs3.chmodSync(SECRET_FILE, 384);
+      } catch {
+      }
+      return existing;
+    }
   }
   const generated = crypto2.randomBytes(48).toString("hex");
   fs3.writeFileSync(SECRET_FILE, generated, { encoding: "utf-8", mode: 384 });
@@ -4074,14 +4157,15 @@ function signAuthToken(user, ttlHours = 24 * 7) {
     userId: user.id,
     role: user.role,
     iat: now,
-    exp: now + ttlHours * 3600
+    exp: now + ttlHours * 3600,
+    ver: db.getAuthVersion(user.id)
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const sig = crypto2.createHmac("sha256", SESSION_SECRET).update(encoded).digest("base64url");
   return `${encoded}.${sig}`;
 }
 function verifyAuthToken(token) {
-  if (!token || typeof token !== "string" || !token.includes(".")) {
+  if (!token || typeof token !== "string" || token.length > 4096 || !token.includes(".")) {
     return null;
   }
   const parts = token.split(".");
@@ -4095,7 +4179,8 @@ function verifyAuthToken(token) {
       return null;
     }
     const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf-8"));
-    if (!payload.userId || !payload.exp || payload.exp < Math.floor(Date.now() / 1e3)) {
+    const now = Math.floor(Date.now() / 1e3);
+    if (typeof payload.userId !== "string" || payload.userId.length < 1 || payload.userId.length > 128 || !Number.isSafeInteger(payload.iat) || !Number.isSafeInteger(payload.exp) || !Number.isSafeInteger(payload.ver) || payload.ver < 0 || payload.iat <= 0 || payload.iat > now + 60 || payload.exp <= now || payload.exp <= payload.iat || payload.exp - payload.iat > 30 * 24 * 60 * 60) {
       return null;
     }
     return payload;
@@ -4130,7 +4215,7 @@ function requireAuth(req, res, next) {
   const token = authHeader.slice("Bearer ".length).trim();
   const payload = verifyAuthToken(token);
   if (!payload) {
-    const ip = String(req.headers["x-forwarded-for"] || req.ip || "unknown").split(",")[0].trim();
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
     const badTracker = trackLoginFailureWindow(`bad-token:${ip}`, 10 * 60 * 1e3, 3, 5 * 60 * 1e3);
     recordSecurityEvent({
       req,
@@ -4152,6 +4237,10 @@ function requireAuth(req, res, next) {
   const user = db.findUserById(payload.userId);
   if (!user) {
     res.status(401).json({ error: "\u0627\u0644\u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+    return;
+  }
+  if (!db.isAuthVersionCurrent(user.id, payload.ver)) {
+    res.status(401).json({ error: "\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0633\u0627\u0628. \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B." });
     return;
   }
   if (spoofedUserId && spoofedUserId !== user.id || spoofedRole && spoofedRole !== user.role) {
@@ -4204,6 +4293,18 @@ function isSchoolAdminOrOwner(user) {
 }
 function userHasAIAccess(user) {
   return Boolean(user && isPlatformOwner(user) && user.hasAIAccess === true);
+}
+function canAccessAcademicScope(user, grade, subjectId) {
+  if (isSchoolAdminOrOwner(user)) return true;
+  const grades = user.assignedGrades;
+  const subjects = user.assignedSubjects;
+  if (!Array.isArray(grades) || grades.length === 0) return false;
+  if (!Array.isArray(subjects) || subjects.length === 0) return false;
+  const normalizedGrade = typeof grade === "string" ? grade.trim() : "";
+  const normalizedSubject = typeof subjectId === "string" ? subjectId.trim() : "";
+  if (normalizedGrade && !grades.includes("all") && !grades.includes(normalizedGrade)) return false;
+  if (normalizedSubject && !subjects.includes("all") && !subjects.includes(normalizedSubject)) return false;
+  return true;
 }
 function requireAIAccess(req, res, next) {
   const user = req.authUser;
@@ -4289,6 +4390,25 @@ function canAccessOwnedRecord(user, record, mode) {
 
 // server/routes.ts
 var router = express.Router();
+function requireAIRateLimit(req, res, next) {
+  const userId = req.authUser?.id || "anonymous";
+  const limit = checkSlidingRateLimit(`ai-request:${userId}`, 15, 60 * 1e3);
+  if (!limit.allowed) {
+    res.setHeader("Retry-After", String(limit.retryAfterSec));
+    res.status(429).json({
+      error: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u062D\u062F \u0627\u0644\u0645\u0624\u0642\u062A \u0644\u0637\u0644\u0628\u0627\u062A \u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064A. \u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 \u062B\u0645 \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629.",
+      code: "AI_RATE_LIMITED",
+      retryAfterSec: limit.retryAfterSec
+    });
+    return;
+  }
+  next();
+}
+function hasValidTeacherAssignments(subjects, grades) {
+  const validSubjects = new Set(db.getSubjects().map((subject) => subject.id));
+  const validGrades = new Set(Array.from({ length: 9 }, (_, index) => `Grade ${index + 1}`));
+  return Array.isArray(subjects) && subjects.length > 0 && !subjects.includes("all") && subjects.every((id) => typeof id === "string" && validSubjects.has(id)) && Array.isArray(grades) && grades.length > 0 && !grades.includes("all") && grades.every((grade) => typeof grade === "string" && validGrades.has(grade));
+}
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
 });
@@ -4384,12 +4504,8 @@ router.post("/auth/register", (req, res) => {
   const safeRole = requestedRole === "SchoolAdmin" ? "SchoolAdmin" : "Teacher";
   const subjectsArr = Array.isArray(assignedSubjects) ? assignedSubjects.map(String) : [];
   const gradesArr = Array.isArray(assignedGrades) ? assignedGrades.map(String) : [];
-  if (safeRole === "Teacher" && subjectsArr.length === 0) {
-    res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0645\u0627\u062F\u0629 \u062F\u0631\u0627\u0633\u064A\u0629 \u0648\u0627\u062D\u062F\u0629 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644" });
-    return;
-  }
-  if (safeRole === "Teacher" && gradesArr.length === 0) {
-    res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u062D\u062F\u064A\u062F \u0635\u0641 \u062F\u0631\u0627\u0633\u064A \u0648\u0627\u062D\u062F \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644" });
+  if (safeRole === "Teacher" && !hasValidTeacherAssignments(subjectsArr, gradesArr)) {
+    res.status(400).json({ error: "\u064A\u062C\u0628 \u062A\u062D\u062F\u064A\u062F \u0645\u0627\u062F\u0629 \u0648\u0635\u0641 \u062F\u0631\u0627\u0633\u064A \u0635\u062D\u064A\u062D\u064A\u0646 \u0645\u0646 \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647\u0627" });
     return;
   }
   try {
@@ -4467,6 +4583,16 @@ router.post("/auth/login", (req, res) => {
     });
     return;
   }
+  const unknownIpKey = `unknown:${meta.ipAddress}`;
+  const unknownIpLock = isLoginWindowLocked(unknownIpKey);
+  if (unknownIpLock.locked) {
+    res.status(429).json({
+      error: `\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0624\u0642\u062A\u0627\u064B \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0627\u062A\u0635\u0627\u0644. \u0623\u0639\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F ${unknownIpLock.retryAfterSec} \u062B\u0627\u0646\u064A\u0629.`,
+      code: "RATE_LIMITED",
+      retryAfterSec: unknownIpLock.retryAfterSec
+    });
+    return;
+  }
   const user = db.findUserByUsername(cleanUsername);
   if (!user) {
     const regReq = db.findRegistrationRequestByUsername(cleanUsername);
@@ -4494,7 +4620,7 @@ router.post("/auth/login", (req, res) => {
       res.status(403).json({ error: msg, accountStatus: regReq.status });
       return;
     }
-    const unknownTracker = trackLoginFailureWindow(`unknown:${meta.ipAddress}`, 10 * 60 * 1e3, 5, 10 * 60 * 1e3);
+    const unknownTracker = trackLoginFailureWindow(unknownIpKey, 10 * 60 * 1e3, 5, 10 * 60 * 1e3);
     recordSecurityEvent({
       req,
       actorId: "anonymous",
@@ -4570,8 +4696,9 @@ router.post("/auth/login", (req, res) => {
     return;
   }
   clearLoginFailureWindow(lockKey);
+  clearLoginFailureWindow(unknownIpKey);
   db.recordUserLoginSuccess(user.id);
-  const { passwordHash: _, ...safeUser } = db.findUserByUsername(cleanUsername);
+  const { passwordHash: _, authVersion: _authVersion, ...safeUser } = db.findUserByUsername(cleanUsername);
   const token = signAuthToken(safeUser);
   recordSecurityEvent({
     req,
@@ -4822,9 +4949,16 @@ router.get("/system/stats", (req, res) => {
   res.json(payload);
 });
 router.get("/curricula", (req, res) => {
+  const user = req.authUser;
   const grade = req.query.grade;
   const subjectId = req.query.subjectId;
-  res.json(db.getCurricula(grade, subjectId));
+  if ((grade || subjectId) && !canAccessAcademicScope(user, grade, subjectId)) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
+    return;
+  }
+  res.json(db.getCurricula(grade, subjectId).filter(
+    (unit) => canAccessAcademicScope(user, unit.grade, unit.subjectId)
+  ));
 });
 router.post("/curricula/unit", requireSchoolAdminOrOwner, (req, res) => {
   const unit = req.body;
@@ -4885,7 +5019,9 @@ router.get("/questions", (req, res) => {
     sourceCode,
     educationalLevel,
     grammarCategory
-  });
+  }).filter(
+    (question) => canAccessAcademicScope(user, question.grade, question.subjectId || "subj-en")
+  );
   res.json(list);
 });
 router.post("/questions", (req, res) => {
@@ -4893,6 +5029,10 @@ router.post("/questions", (req, res) => {
   const q = req.body;
   if (!q.questionText || !q.modelAnswer || !q.grade) {
     res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u0642\u062F\u064A\u0645 \u0646\u0635 \u0627\u0644\u0633\u0624\u0627\u0644 \u0648\u0627\u0644\u0635\u0641 \u0648\u0627\u0644\u0625\u062C\u0627\u0628\u0629 \u0627\u0644\u0646\u0645\u0648\u0630\u062C\u064A\u0629" });
+    return;
+  }
+  if (!canAccessAcademicScope(user, q.grade, q.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
     return;
   }
   const isQuranQuestion = q.subjectId === "subj-quran" || String(q.type || "").startsWith("Quran");
@@ -4924,6 +5064,10 @@ router.put("/questions/:id", (req, res) => {
     res.status(404).json({ error: "\u0627\u0644\u0633\u0624\u0627\u0644 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
     return;
   }
+  if (!canAccessAcademicScope(user, existing.grade, existing.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
+    return;
+  }
   if (!canAccessOwnedRecord(user, existing, "edit")) {
     recordSecurityEvent({
       req,
@@ -4940,7 +5084,22 @@ router.put("/questions/:id", (req, res) => {
     res.status(403).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643 \u0628\u062A\u0639\u062F\u064A\u0644 \u0647\u0630\u0627 \u0627\u0644\u0633\u0624\u0627\u0644 \u0627\u0644\u062E\u0627\u0635" });
     return;
   }
-  const { ownerId: _ignoredOwner, id: _ignoredId, ...safePatch } = req.body;
+  const {
+    ownerId: _ignoredOwner,
+    createdBy: _ignoredCreator,
+    sharedWith: _ignoredShares,
+    id: _ignoredId,
+    createdAt: _ignoredCreatedAt,
+    ...safePatch
+  } = req.body || {};
+  if (!canAccessAcademicScope(
+    user,
+    safePatch.grade || existing.grade,
+    safePatch.subjectId || existing.subjectId || "subj-en"
+  )) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
+    return;
+  }
   const updated = db.updateQuestion(req.params.id, safePatch);
   res.json({ success: true, question: updated });
 });
@@ -4949,6 +5108,10 @@ router.delete("/questions/:id", (req, res) => {
   const existing = db.getQuestionById(req.params.id);
   if (!existing) {
     res.status(404).json({ error: "\u0627\u0644\u0633\u0624\u0627\u0644 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+    return;
+  }
+  if (!canAccessAcademicScope(user, existing.grade, existing.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
     return;
   }
   if ((existing.ownerId || "usr-admin") !== user.id) {
@@ -4979,7 +5142,7 @@ router.delete("/questions/:id", (req, res) => {
   });
   res.json({ success: ok });
 });
-router.post("/questions/generate", requireAIAccess, async (req, res) => {
+router.post("/questions/generate", requireAIAccess, requireAIRateLimit, async (req, res) => {
   const { grade, unitTitle, type, difficulty, marks, lessonFocus, sourceCode, educationalLevel, grammarCategory, subjectId } = req.body;
   if (subjectId === "subj-quran" || String(type || "").startsWith("Quran")) {
     res.status(400).json({
@@ -5005,13 +5168,20 @@ router.post("/questions/generate", requireAIAccess, async (req, res) => {
   }
 });
 router.get("/exams", (req, res) => {
-  res.json(db.getExams(req.authUser.id));
+  const user = req.authUser;
+  res.json(db.getExams(user.id).filter(
+    (exam) => canAccessAcademicScope(user, exam.grade, exam.subjectId || "subj-en")
+  ));
 });
 router.get("/exams/:id", (req, res) => {
   const user = req.authUser;
   const exam = db.getExamById(req.params.id);
   if (!exam) {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+    return;
+  }
+  if (!canAccessAcademicScope(user, exam.grade, exam.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
     return;
   }
   if (!canAccessOwnedRecord(user, exam, "view")) {
@@ -5040,6 +5210,15 @@ router.post("/exams", (req, res) => {
   const exam = req.body;
   if (!exam.title || !exam.grade || !exam.sections) {
     res.status(400).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0643\u062A\u0645\u0644\u0629" });
+    return;
+  }
+  const existingForScope = exam.id ? db.getExamById(exam.id) : void 0;
+  if (!canAccessAcademicScope(
+    user,
+    exam.grade || existingForScope?.grade,
+    exam.subjectId || existingForScope?.subjectId || "subj-en"
+  )) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0625\u0646\u0634\u0627\u0621 \u0623\u0648 \u062A\u0639\u062F\u064A\u0644 \u0627\u062E\u062A\u0628\u0627\u0631 \u0644\u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629" });
     return;
   }
   if (exam.id) {
@@ -5114,6 +5293,14 @@ router.put("/exams/:id", (req, res) => {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
     return;
   }
+  if (!canAccessAcademicScope(
+    user,
+    req.body?.grade || existing.grade,
+    req.body?.subjectId || existing.subjectId || "subj-en"
+  )) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
+    return;
+  }
   if (!canAccessOwnedRecord(user, existing, "edit")) {
     recordSecurityEvent({
       req,
@@ -5174,6 +5361,10 @@ router.delete("/exams/:id", (req, res) => {
     res.status(403).json({ error: "\u0641\u0642\u0637 \u0645\u0627\u0644\u0643 \u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u064A\u0645\u0643\u0646\u0647 \u0623\u0631\u0634\u0641\u062A\u0647 \u0623\u0648 \u062D\u0630\u0641\u0647" });
     return;
   }
+  if (!canAccessAcademicScope(user, existing.grade, existing.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
+    return;
+  }
   const ok = db.deleteExam(req.params.id);
   if (ok) {
     recordSecurityEvent({
@@ -5194,6 +5385,10 @@ router.post("/exams/:id/clone", (req, res) => {
   const original = db.getExamById(req.params.id);
   if (!original) {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+    return;
+  }
+  if (!canAccessAcademicScope(user, original.grade, original.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
     return;
   }
   if (!canAccessOwnedRecord(user, original, "view")) {
@@ -5247,6 +5442,10 @@ router.post("/exams/:id/approve", (req, res) => {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
     return;
   }
+  if (!canAccessAcademicScope(user, exam.grade, exam.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
+    return;
+  }
   if (!canAccessOwnedRecord(user, exam, "edit")) {
     res.status(403).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643 \u0628\u0627\u0639\u062A\u0645\u0627\u062F \u0647\u0630\u0627 \u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631" });
     return;
@@ -5272,7 +5471,7 @@ router.post("/exams/:id/export-log", (req, res) => {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
     return;
   }
-  if (!canAccessOwnedRecord(user, exam, "view")) {
+  if (!canAccessAcademicScope(user, exam.grade, exam.subjectId || "subj-en") || !canAccessOwnedRecord(user, exam, "view")) {
     res.status(403).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0643 \u0628\u062A\u0635\u062F\u064A\u0631 \u0647\u0630\u0627 \u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631" });
     return;
   }
@@ -5304,7 +5503,7 @@ router.post("/exams/:id/export-pdf", async (req, res) => {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
     return;
   }
-  if (!isPracticeSandbox && !canAccessOwnedRecord(user, exam, "view")) {
+  if (!isPracticeSandbox && (!canAccessAcademicScope(user, exam.grade, exam.subjectId || "subj-en") || !canAccessOwnedRecord(user, exam, "view"))) {
     recordSecurityEvent({
       req,
       actor: user,
@@ -5461,6 +5660,10 @@ router.post("/exams/:id/share", (req, res) => {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
     return;
   }
+  if (!canAccessAcademicScope(actor, exam.grade, exam.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629 \u0627\u0644\u062F\u0631\u0627\u0633\u064A\u0629" });
+    return;
+  }
   if ((exam.ownerId || exam.createdBy) !== actor.id) {
     res.status(403).json({ error: "\u0641\u0642\u0637 \u0645\u0627\u0644\u0643 \u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u064A\u0645\u0643\u0646\u0647 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u0634\u0627\u0631\u0643\u0629" });
     return;
@@ -5540,7 +5743,7 @@ router.delete("/exams/:id/share/:targetUserId", (req, res) => {
   });
   res.json({ success: true, exam });
 });
-router.post("/exams/generate-ai", requireAIAccess, async (req, res) => {
+router.post("/exams/generate-ai", requireAIAccess, requireAIRateLimit, async (req, res) => {
   const user = req.authUser;
   const requestData = req.body;
   if (!requestData.grade || !requestData.selectedUnits || requestData.selectedUnits.length === 0) {
@@ -5572,10 +5775,24 @@ router.post("/exams/validate", (req, res) => {
   const report = geminiService.runQualityAudit(sections || [], Number(totalMarks) || 20, grade || "Grade 9");
   res.json(report);
 });
-router.post("/vision/analyze", requireAIAccess, async (req, res) => {
+router.post("/vision/analyze", requireAIAccess, requireAIRateLimit, async (req, res) => {
   const { images, gradeHint, unitHint } = req.body;
-  if (!images || !Array.isArray(images) || images.length === 0) {
+  if (!Array.isArray(images) || images.length === 0) {
     res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u062A\u0642\u062F\u064A\u0645 \u0635\u0648\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644 \u0644\u0644\u062A\u062D\u0644\u064A\u0644" });
+    return;
+  }
+  if (images.length > 8) {
+    res.status(413).json({ error: "\u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647 \u0647\u0648 8 \u0635\u0648\u0631 \u0641\u064A \u0627\u0644\u0637\u0644\u0628 \u0627\u0644\u0648\u0627\u062D\u062F" });
+    return;
+  }
+  let totalImagePayload = 0;
+  const validImages = images.every((image) => {
+    if (!image || typeof image.dataUrl !== "string") return false;
+    totalImagePayload += image.dataUrl.length;
+    return /^data:image\/(?:png|jpeg|webp);base64,/i.test(image.dataUrl) && image.dataUrl.length <= 55e5;
+  });
+  if (!validImages || totalImagePayload > 95e5) {
+    res.status(400).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0635\u0648\u0631 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629 \u0623\u0648 \u064A\u062A\u062C\u0627\u0648\u0632 \u062D\u062C\u0645\u0647\u0627 \u0627\u0644\u062D\u062F \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647" });
     return;
   }
   try {
@@ -5588,6 +5805,7 @@ router.post("/vision/analyze", requireAIAccess, async (req, res) => {
 router.post(
   "/vision/generate-questions",
   requireAIAccess,
+  requireAIRateLimit,
   async (req, res) => {
     const user = req.authUser;
     const { analysis, grade, contentScope, educationalLevel, selectedQuestionTypes, count, teacherNotes, saveToBank } = req.body;
@@ -5616,7 +5834,7 @@ router.post(
     }
   }
 );
-router.post("/vision/validate-fidelity", requireAIAccess, (req, res) => {
+router.post("/vision/validate-fidelity", requireAIAccess, requireAIRateLimit, (req, res) => {
   const { question, analysis, contentScope } = req.body;
   if (!question || !analysis) {
     res.status(400).json({ error: "\u0627\u0644\u0633\u0624\u0627\u0644 \u0648\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062A\u062D\u0644\u064A\u0644 \u0645\u0637\u0644\u0648\u0628\u0629 \u0644\u0625\u062C\u0631\u0627\u0621 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0645\u0637\u0627\u0628\u0642\u0629 \u0627\u0644\u0645\u0635\u062F\u0631" });
@@ -5631,28 +5849,36 @@ router.post("/vision/validate-fidelity", requireAIAccess, (req, res) => {
 });
 router.get("/documents", requireAIAccess, (req, res) => {
   const uid = req.authUser.id;
-  res.json(db.getAnalyzedDocuments().filter((d) => !d.ownerId || d.ownerId === uid));
+  res.json(db.getAnalyzedDocuments().filter((d) => d.ownerId === uid));
 });
 router.get("/documents/:id", requireAIAccess, (req, res) => {
   const doc = db.getAnalyzedDocumentById(req.params.id);
-  if (!doc || doc.ownerId && doc.ownerId !== req.authUser.id) {
+  if (!doc || doc.ownerId !== req.authUser.id) {
     res.status(404).json({ error: "\u0627\u0644\u0645\u0633\u062A\u0646\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
     return;
   }
   res.json(doc);
 });
 router.post("/documents", requireAIAccess, (req, res) => {
-  const doc = req.body;
+  const doc = req.body && typeof req.body === "object" ? req.body : {};
   if (!doc.title || !doc.analysis) {
     res.status(400).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0633\u062A\u0646\u062F \u063A\u064A\u0631 \u0645\u0643\u062A\u0645\u0644\u0629" });
     return;
   }
-  const saved = db.saveAnalyzedDocument({ ...doc, ownerId: req.authUser.id });
+  if (doc.id) {
+    const existing = db.getAnalyzedDocumentById(String(doc.id));
+    if (existing && existing.ownerId !== req.authUser.id) {
+      res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u062A\u0639\u062F\u064A\u0644 \u0647\u0630\u0627 \u0627\u0644\u0645\u0633\u062A\u0646\u062F" });
+      return;
+    }
+  }
+  const { ownerId: _ignoredOwner, ...safeDocument } = doc;
+  const saved = db.saveAnalyzedDocument({ ...safeDocument, ownerId: req.authUser.id });
   res.json({ success: true, document: saved });
 });
 router.delete("/documents/:id", requireAIAccess, (req, res) => {
   const doc = db.getAnalyzedDocumentById(req.params.id);
-  if (doc && doc.ownerId && doc.ownerId !== req.authUser.id) {
+  if (doc && doc.ownerId !== req.authUser.id) {
     res.status(403).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0628\u062D\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u0645\u0633\u062A\u0646\u062F" });
     return;
   }
@@ -5660,12 +5886,19 @@ router.delete("/documents/:id", requireAIAccess, (req, res) => {
   res.json({ success: ok });
 });
 router.get("/archive", (req, res) => {
-  res.json(db.getArchive(req.authUser.id));
+  const user = req.authUser;
+  res.json(db.getArchive(user.id).filter(
+    (exam) => canAccessAcademicScope(user, exam.grade, exam.subjectId || "subj-en")
+  ));
 });
 router.post("/archive/:id/restore", (req, res) => {
   const exam = db.getExamById(req.params.id);
   if (!exam) {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u0627\u0644\u0645\u0624\u0631\u0634\u0641 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+    return;
+  }
+  if (!canAccessAcademicScope(req.authUser, exam.grade, exam.subjectId || "subj-en")) {
+    res.status(403).json({ error: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0633\u062A\u0631\u062C\u0627\u0639 \u0627\u062E\u062A\u0628\u0627\u0631 \u0644\u0647\u0630\u0627 \u0627\u0644\u0635\u0641 \u0623\u0648 \u0627\u0644\u0645\u0627\u062F\u0629" });
     return;
   }
   if ((exam.ownerId || exam.createdBy) !== req.authUser.id) {
@@ -5702,16 +5935,57 @@ router.get("/ai/settings", requireAIAccess, (_req, res) => {
   res.json(db.getAISettings());
 });
 router.post("/ai/settings", requireAIAccess, (req, res) => {
-  const updated = db.updateAISettings(req.body);
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const patch = {};
+  const availableModelIds = new Set(geminiService.getAvailableModels().map((model) => model.id));
+  if (Object.prototype.hasOwnProperty.call(body, "primaryModel")) {
+    if (typeof body.primaryModel !== "string" || !availableModelIds.has(body.primaryModel)) {
+      res.status(400).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0623\u0633\u0627\u0633\u064A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D" });
+      return;
+    }
+    patch.primaryModel = body.primaryModel;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "fallbackModel")) {
+    if (typeof body.fallbackModel !== "string" || !availableModelIds.has(body.fallbackModel)) {
+      res.status(400).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D" });
+      return;
+    }
+    patch.fallbackModel = body.fallbackModel;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "allowPaidModels")) {
+    if (typeof body.allowPaidModels !== "boolean") {
+      res.status(400).json({ error: "\u0642\u064A\u0645\u0629 \u0627\u0644\u0633\u0645\u0627\u062D \u0628\u0627\u0644\u0646\u0645\u0627\u0630\u062C \u0627\u0644\u0645\u062F\u0641\u0648\u0639\u0629 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+      return;
+    }
+    patch.allowPaidModels = body.allowPaidModels;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "temperature")) {
+    const temperature = Number(body.temperature);
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+      res.status(400).json({ error: "\u062F\u0631\u062C\u0629 \u062D\u0631\u0627\u0631\u0629 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0628\u064A\u0646 0 \u06482" });
+      return;
+    }
+    patch.temperature = temperature;
+  }
+  const updated = db.updateAISettings(patch);
   res.json({ success: true, settings: updated });
 });
 router.get("/ai/models", requireAIAccess, (_req, res) => {
   res.json(geminiService.getAvailableModels());
 });
-router.post("/ai/ping", requireAIAccess, async (req, res) => {
-  const { model } = req.body;
-  const result = await geminiService.pingTest(model);
-  res.json(result);
+router.post("/ai/ping", requireAIAccess, requireAIRateLimit, async (req, res) => {
+  const { model } = req.body || {};
+  const availableModels = geminiService.getAvailableModels();
+  if (model && !availableModels.some((item) => item.id === model || item.name === model)) {
+    res.status(400).json({ error: "\u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0645\u062D\u062F\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0636\u0645\u0646 \u0627\u0644\u0646\u0645\u0627\u0630\u062C \u0627\u0644\u0645\u062A\u0627\u062D\u0629" });
+    return;
+  }
+  try {
+    const result = await geminiService.pingTest(model);
+    res.json(result);
+  } catch {
+    res.status(502).json({ error: "\u062A\u0639\u0630\u0631 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0628\u062E\u062F\u0645\u0629 \u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064A \u062D\u0627\u0644\u064A\u0627\u064B" });
+  }
 });
 router.get("/ai/logs", requireAIAccess, (_req, res) => {
   res.json(db.getAILogs());
@@ -5993,7 +6267,15 @@ router.post("/system/users", requireSchoolAdminOrOwner, (req, res) => {
     }
   }
   const resolvedRole = role === "PlatformOwner" ? "PlatformOwner" : role === "SchoolAdmin" ? "SchoolAdmin" : "Teacher";
+  if (resolvedRole === "SchoolAdmin" && !isPlatformOwner(actor)) {
+    res.status(403).json({ error: "\u0625\u0646\u0634\u0627\u0621 \u062D\u0633\u0627\u0628\u0627\u062A \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u062F\u0631\u0633\u0629 \u0645\u062D\u0635\u0648\u0631 \u0628\u0635\u0627\u062D\u0628 \u0627\u0644\u0645\u0646\u0635\u0629" });
+    return;
+  }
   const resolvedAI = isPlatformOwner(actor) && resolvedRole === "PlatformOwner" ? Boolean(hasAIAccess) : false;
+  if (resolvedRole === "Teacher" && !hasValidTeacherAssignments(assignedSubjects, assignedGrades)) {
+    res.status(400).json({ error: "\u064A\u062C\u0628 \u062A\u062D\u062F\u064A\u062F \u0645\u0627\u062F\u0629 \u0648\u0635\u0641 \u062F\u0631\u0627\u0633\u064A \u0635\u062D\u064A\u062D\u064A\u0646 \u0644\u0644\u0645\u0639\u0644\u0645" });
+    return;
+  }
   try {
     const newUser = db.createUser({
       username,
@@ -6050,9 +6332,26 @@ router.put("/system/users/:id", requireSchoolAdminOrOwner, (req, res) => {
     res.status(403).json({ error: "\u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u0639\u062F\u064A\u0644 \u062D\u0633\u0627\u0628 \u0635\u0627\u062D\u0628 \u0627\u0644\u0645\u0646\u0635\u0629" });
     return;
   }
-  const patch = { ...req.body };
-  delete patch.passwordHash;
-  delete patch.id;
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const allowedUserFields = [
+    "name",
+    "role",
+    "status",
+    "hasAIAccess",
+    "assignedSubjects",
+    "assignedGrades",
+    "email",
+    "phone",
+    "school",
+    "reviewNotes",
+    "delegatedPermissions"
+  ];
+  const patch = {};
+  for (const field of allowedUserFields) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      patch[field] = body[field];
+    }
+  }
   if (!isPlatformOwner(actor)) {
     delete patch.hasAIAccess;
     delete patch.delegatedPermissions;
@@ -6061,9 +6360,21 @@ router.put("/system/users/:id", requireSchoolAdminOrOwner, (req, res) => {
       res.status(403).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0628\u0627\u0644\u062A\u0631\u0642\u064A\u0629 \u0625\u0644\u0649 \u0645\u0627\u0644\u0643 \u0627\u0644\u0645\u0646\u0635\u0629" });
       return;
     }
+    if (patch.role === "SchoolAdmin" && target.role !== "SchoolAdmin") {
+      res.status(403).json({ error: "\u062A\u0631\u0642\u064A\u0629 \u0627\u0644\u062D\u0633\u0627\u0628 \u0625\u0644\u0649 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u062F\u0631\u0633\u0629 \u0645\u062D\u0635\u0648\u0631\u0629 \u0628\u0635\u0627\u062D\u0628 \u0627\u0644\u0645\u0646\u0635\u0629" });
+      return;
+    }
   }
   if (patch.role === "Teacher" || patch.role === "SchoolAdmin") {
     patch.hasAIAccess = false;
+  }
+  const nextRole = patch.role || target.role;
+  if (nextRole === "Teacher" && !hasValidTeacherAssignments(
+    patch.assignedSubjects ?? target.assignedSubjects,
+    patch.assignedGrades ?? target.assignedGrades
+  )) {
+    res.status(400).json({ error: "\u064A\u062C\u0628 \u062A\u062D\u062F\u064A\u062F \u0645\u0627\u062F\u0629 \u0648\u0635\u0641 \u062F\u0631\u0627\u0633\u064A \u0635\u062D\u064A\u062D\u064A\u0646 \u0644\u0644\u0645\u0639\u0644\u0645" });
+    return;
   }
   const updated = db.updateUser(req.params.id, patch);
   recordSecurityEvent({
@@ -6161,14 +6472,48 @@ router.post("/system/restore-upload", requirePlatformOwner, (req, res) => {
 });
 
 // server.ts
-dotenv.config();
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path4.dirname(__filename);
 async function startServer() {
   const app = express2();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
   const isProd = process.env.NODE_ENV === "production";
-  app.use(cors());
+  app.disable("x-powered-by");
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (isProd) {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    next();
+  });
+  const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || "0", 10);
+  if (Number.isInteger(trustProxyHops) && trustProxyHops > 0 && trustProxyHops <= 5) {
+    app.set("trust proxy", trustProxyHops);
+  }
+  const allowedOrigins = new Set(
+    (process.env.CORS_ALLOWED_ORIGINS || "").split(",").map((origin) => origin.trim()).filter(Boolean)
+  );
+  if (!isProd) {
+    allowedOrigins.add("http://localhost:3000");
+    allowedOrigins.add("http://localhost:5173");
+    allowedOrigins.add("http://127.0.0.1:3000");
+    allowedOrigins.add("http://127.0.0.1:5173");
+  }
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Authorization", "Content-Type", "Accept"],
+    maxAge: 600
+  }));
   app.use(express2.json({ limit: "10mb" }));
   app.use(express2.urlencoded({ extended: true, limit: "10mb" }));
   app.use("/api", router);
