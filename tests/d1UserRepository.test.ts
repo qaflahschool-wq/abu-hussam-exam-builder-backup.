@@ -78,3 +78,55 @@ test('returns false when activity update affects no row', async () => {
   const repo = new D1UserRepository(mockD1(null, { runResult: { success: true, meta: { changes: 0 } } }));
   assert.equal(await repo.touchActivity('missing', '2026-11-20T12:00:00.000Z'), false);
 });
+
+test('rotates password hash and increments auth version in one statement', async () => {
+  const capture: { sql?: string; values?: unknown[] } = {};
+  const repo = new D1UserRepository(mockD1(null, capture));
+  assert.equal(await repo.setPasswordHash('user-1', '$2b$10$abcdefghijklmnopqrstuv123456789012345678901234567890', '2026-11-20T12:00:00.000Z'), true);
+  assert.match(capture.sql || '', /authVersion.*COALESCE/);
+  assert.deepEqual(capture.values, ['$2b$10$abcdefghijklmnopqrstuv123456789012345678901234567890', '2026-11-20T12:00:00.000Z', 'user-1']);
+});
+
+test('records successful login by clearing failures and lockout', async () => {
+  const capture: { sql?: string; values?: unknown[] } = {};
+  const repo = new D1UserRepository(mockD1(null, capture));
+  assert.equal(await repo.recordLoginSuccess('user-1', '2026-11-20T12:00:00.000Z'), true);
+  assert.match(capture.sql || '', /failedLoginAttempts/);
+  assert.match(capture.sql || '', /lastLoginAt/);
+  assert.deepEqual(capture.values, ['2026-11-20T12:00:00.000Z', '2026-11-20T12:00:00.000Z', '2026-11-20T12:00:00.000Z', 'user-1']);
+});
+
+test('increments failed login attempts atomically and returns lock state', async () => {
+  const capture: { sql?: string; values?: unknown[] } = {};
+  const fake = mockD1(null, capture);
+  let calls = 0;
+  const database: D1Database = {
+    prepare(sql: string): D1PreparedStatement {
+      calls++;
+      const base = fake.prepare(sql);
+      if (calls === 2) {
+        return {
+          bind(...values: unknown[]) { capture.values = values; return this; },
+          async first<T>() { return { failed_attempts: 5, locked_until: '2026-11-20T12:15:00.000Z' } as T; },
+          async all<T>() { return { success: true, results: [] as T[] }; },
+          async run() { return { success: true }; },
+        };
+      }
+      return base;
+    },
+  };
+  const repo = new D1UserRepository(database);
+  const result = await repo.recordLoginFailure('user-1', 5, 900000, new Date('2026-11-20T12:00:00.000Z'));
+  assert.equal(result.found, true);
+  assert.equal(result.failedAttempts, 5);
+  assert.equal(result.lockedUntil, '2026-11-20T12:15:00.000Z');
+  assert.match(capture.sql || '', /failedLoginAttempts/);
+});
+
+test('rejects invalid lockout settings before querying', async () => {
+  const capture: { sql?: string; values?: unknown[] } = {};
+  const repo = new D1UserRepository(mockD1(null, capture));
+  await assert.rejects(() => repo.recordLoginFailure('user-1', 0), /maximum login attempts/);
+  await assert.rejects(() => repo.recordLoginFailure('user-1', 5, 0), /lock duration/);
+  assert.equal(capture.sql, undefined);
+});
