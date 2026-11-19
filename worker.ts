@@ -91,7 +91,7 @@ export default {
           const input = body as Record<string, unknown>;
           const questionId = typeof input.questionId === 'string' ? input.questionId : '';
           const dataUrl = typeof input.imageDataUrl === 'string' ? input.imageDataUrl : '';
-          const match = dataUrl.match(/^data:(image\\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+          const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
           if (!match || match[2].length > 3_916_020) return json({ error: 'Unsupported or oversized image' }, 400);
           const binary = atob(match[2]);
           const bytes = new Uint8Array(binary.length);
@@ -105,7 +105,7 @@ export default {
           return json({ success: true, image: { id: metadata.id, questionId: metadata.questionId, contentType: metadata.contentType, byteSize: metadata.byteSize } }, 201);
         }
 
-        const imageMatch = url.pathname.match(/^\\/api\\/worker\\/question-images\\/([A-Za-z0-9_-]{1,128})$/);
+        const imageMatch = url.pathname.match(/^\/api\/worker\/question-images\/([A-Za-z0-9_-]{1,128})$/);
         if (imageMatch && request.method === 'GET') {
           const image = await storage.getForOwner(imageMatch[1], auth.user.id);
           if (!image) return json({ error: 'Image not found' }, 404);
