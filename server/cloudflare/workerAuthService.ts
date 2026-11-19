@@ -132,6 +132,160 @@ export class WorkerAuthService {
     };
   }
 
+  async listRegistrationRequests(status?: string): Promise<Record<string, unknown>[]> {
+    const allowed = new Set(['PENDING_APPROVAL', 'NEEDS_EDIT', 'APPROVED', 'REJECTED']);
+    const cleanStatus = status && allowed.has(status) ? status : undefined;
+    const result = cleanStatus
+      ? await this.database.prepare('SELECT record_json FROM registration_requests WHERE status = ? ORDER BY created_at DESC').bind(cleanStatus).all<{ record_json: string }>()
+      : await this.database.prepare('SELECT record_json FROM registration_requests ORDER BY created_at DESC').all<{ record_json: string }>();
+    if (!result.success) throw new Error('Registration requests could not be listed');
+    return (result.results || []).map((row) => {
+      const record = parseRecord(row.record_json);
+      const { passwordHash: _hash, ...safe } = record;
+      return safe;
+    });
+  }
+
+  async approveRegistrationRequest(
+    requestId: string,
+    reviewer: Record<string, unknown>,
+    overrides: { role?: string; assignedSubjects?: unknown; assignedGrades?: unknown; reviewNote?: string } = {},
+  ): Promise<{ request: Record<string, unknown>; user: Record<string, unknown> } | null> {
+    if (!requestId || requestId.length > 128) throw new Error('Invalid registration request id');
+    const row = await this.database.prepare(
+      'SELECT record_json FROM registration_requests WHERE id = ? LIMIT 1'
+    ).bind(requestId).first<{ record_json: string }>();
+    if (!row) return null;
+    const rawRequest = parseRecord(row.record_json);
+    if (!['PENDING_APPROVAL', 'NEEDS_EDIT'].includes(String(rawRequest.status))) {
+      throw new Error('Registration request is not awaiting approval');
+    }
+    if (typeof rawRequest.passwordHash !== 'string' || rawRequest.passwordHash.length < 20) {
+      throw new Error('Registration request credential is malformed');
+    }
+
+    const existing = await this.database.prepare(
+      'SELECT id FROM app_users WHERE username = ? COLLATE NOCASE LIMIT 1'
+    ).bind(String(rawRequest.username)).first<{ id: string }>();
+    if (existing) throw new Error('Username already exists');
+
+    const finalRole = overrides.role === 'SchoolAdmin' || overrides.role === 'Teacher'
+      ? overrides.role
+      : rawRequest.requestedRole === 'SchoolAdmin' ? 'SchoolAdmin' : 'Teacher';
+    let assignedSubjects: string[] = ['all'];
+    let assignedGrades: string[] = ['all'];
+    if (finalRole === 'Teacher') {
+      const subjectRows = await this.database.prepare('SELECT record_json FROM subjects WHERE is_active = 1').all<{ record_json: string }>();
+      if (!subjectRows.success) throw new Error('Could not validate subject assignments');
+      const allowed = new Set((subjectRows.results || []).map((item) => String(parseRecord(item.record_json).id)));
+      const subjectOverride = Array.isArray(overrides.assignedSubjects) ? overrides.assignedSubjects : rawRequest.assignedSubjects;
+      const gradeOverride = Array.isArray(overrides.assignedGrades) ? overrides.assignedGrades : rawRequest.assignedGrades;
+      if (!Array.isArray(subjectOverride) || !subjectOverride.length || subjectOverride.includes('all') ||
+          !subjectOverride.every((value) => typeof value === 'string' && allowed.has(value)) ||
+          !Array.isArray(gradeOverride) || !gradeOverride.length || gradeOverride.includes('all') ||
+          !gradeOverride.every((value) => typeof value === 'string' && GRADES.has(value))) {
+        throw new Error('Teacher assignments are invalid');
+      }
+      assignedSubjects = subjectOverride as string[];
+      assignedGrades = gradeOverride as string[];
+    }
+
+    const schoolRow = await this.database.prepare('SELECT record_json FROM school_settings WHERE singleton_id = 1').first<{ record_json: string }>();
+    const schoolSettings = schoolRow ? parseRecord(schoolRow.record_json) : {};
+    const now = new Date().toISOString();
+    const userId = `usr-${crypto.randomUUID()}`;
+    const user = {
+      id: userId,
+      username: String(rawRequest.username),
+      name: String(rawRequest.fullName),
+      role: finalRole,
+      status: 'ACTIVE',
+      hasAIAccess: false,
+      assignedSubjects,
+      assignedGrades,
+      phone: rawRequest.phone,
+      school: typeof schoolSettings.schoolNameAr === 'string' ? schoolSettings.schoolNameAr : 'مدرسة قفلة للتعليم الأساسي',
+      registrationRequestId: requestId,
+      reviewedBy: String(reviewer.id),
+      reviewedByName: String(reviewer.name || ''),
+      reviewedAt: now,
+      reviewNotes: typeof overrides.reviewNote === 'string' ? overrides.reviewNote.slice(0, 1000) : rawRequest.reviewNote,
+      delegatedPermissions: finalRole === 'SchoolAdmin' ? {
+        canManageTeachers: true,
+        canManageSubjects: true,
+        canManageIdentity: true,
+        canManageCurricula: true,
+      } : undefined,
+      createdAt: now,
+      passwordHash: rawRequest.passwordHash,
+      authVersion: 0,
+    };
+    const updatedRequest = {
+      ...rawRequest,
+      status: 'APPROVED',
+      reviewedBy: String(reviewer.id),
+      reviewedByName: String(reviewer.name || ''),
+      reviewedAt: now,
+      reviewNote: typeof overrides.reviewNote === 'string' ? overrides.reviewNote.slice(0, 1000) : rawRequest.reviewNote,
+      approvedUserId: userId,
+      updatedAt: now,
+    };
+
+    if (!this.database.batch) throw new Error('Transactional D1 batch is required for account approval');
+    const results = await this.database.batch([
+      this.database.prepare(
+        "UPDATE registration_requests SET status = 'APPROVED', record_json = ?, updated_at = ? WHERE id = ? AND status IN ('PENDING_APPROVAL','NEEDS_EDIT')"
+      ).bind(JSON.stringify(updatedRequest), now, requestId),
+      this.database.prepare(
+        "INSERT INTO app_users (id, username, role, status, record_json, created_at, updated_at) " +
+        "SELECT ?, ?, ?, 'ACTIVE', ?, ?, ? WHERE EXISTS (" +
+        "SELECT 1 FROM registration_requests WHERE id = ? AND status = 'APPROVED' " +
+        "AND json_extract(record_json, '$.approvedUserId') = ?)"
+      ).bind(userId, user.username, user.role, JSON.stringify(user), now, now, requestId, userId),
+    ]);
+    const requestChanges = Number(results[0]?.meta?.changes || 0);
+    const userChanges = Number(results[1]?.meta?.changes || 0);
+    if (requestChanges !== 1 || userChanges !== 1) {
+      throw new Error('Registration approval lost a concurrent update; no account was created');
+    }
+    const { passwordHash: _requestHash, ...safeRequest } = updatedRequest;
+    const { passwordHash: _userHash, authVersion: _version, ...safeUser } = user;
+    return { request: safeRequest, user: safeUser };
+  }
+
+  async reviewRegistrationRequest(
+    requestId: string,
+    reviewer: Record<string, unknown>,
+    status: 'REJECTED' | 'NEEDS_EDIT',
+    reviewNote: string,
+  ): Promise<Record<string, unknown> | null> {
+    if (!requestId || requestId.length > 128) throw new Error('Invalid registration request id');
+    const row = await this.database.prepare('SELECT record_json FROM registration_requests WHERE id = ? LIMIT 1')
+      .bind(requestId).first<{ record_json: string }>();
+    if (!row) return null;
+    const record = parseRecord(row.record_json);
+    if (!['PENDING_APPROVAL', 'NEEDS_EDIT'].includes(String(record.status))) {
+      throw new Error('Registration request is no longer pending');
+    }
+    const now = new Date().toISOString();
+    const updated = {
+      ...record,
+      status,
+      reviewedBy: String(reviewer.id),
+      reviewedByName: String(reviewer.name || ''),
+      reviewedAt: now,
+      reviewNote: reviewNote.slice(0, 1000),
+      updatedAt: now,
+    };
+    const result = await this.database.prepare(
+      "UPDATE registration_requests SET status = ?, record_json = ?, updated_at = ? WHERE id = ? AND status IN ('PENDING_APPROVAL','NEEDS_EDIT')"
+    ).bind(status, JSON.stringify(updated), now, requestId).run();
+    if (!result.success) throw new Error('Registration review update failed');
+    if (Number(result.meta?.changes || 0) !== 1) throw new Error('Registration request changed concurrently');
+    const { passwordHash: _hash, ...safe } = updated;
+    return safe;
+  }
+
   async login(body: unknown, ip: string): Promise<AuthServiceResult> {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return { status: 400, body: { error: 'يرجى إدخال اسم المستخدم وكلمة المرور' } };
