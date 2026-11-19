@@ -1,0 +1,81 @@
+name: Inspect uploaded project archive
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Inspect ZIP safely (no project code is executed)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, re, zipfile
+          from pathlib import PurePosixPath
+
+          candidates = [n for n in os.listdir(".") if n.lower().endswith(".zip")]
+          if not candidates:
+              raise SystemExit("No ZIP archive found in repository root.")
+          archive = next((n for n in candidates if "hussam" in n.lower()), candidates[0])
+
+          MAX_ENTRIES = 1000
+          MAX_TOTAL = 100 * 1024 * 1024
+          MAX_FILE = 10 * 1024 * 1024
+          secret_patterns = [
+              ("Private key", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+              ("Google API key", re.compile(rb"AIza[0-9A-Za-z_-]{30,}")),
+              ("GitHub token", re.compile(rb"gh[pousr]_[A-Za-z0-9_]{20,}")),
+              ("Generic secret assignment", re.compile(rb"(?i)(api[_-]?key|secret|password|token)\\s*[:=]\\s*['\\"][^'\\"]{8,}")),
+          ]
+          findings = []
+          lines = []
+          with zipfile.ZipFile(archive) as z:
+              infos = z.infolist()
+              if len(infos) > MAX_ENTRIES:
+                  raise SystemExit(f"Archive rejected: {len(infos)} entries exceeds safety limit {MAX_ENTRIES}.")
+              total = sum(i.file_size for i in infos)
+              if total > MAX_TOTAL:
+                  raise SystemExit(f"Archive rejected: expanded size {total} bytes exceeds safety limit.")
+              lines.append(f"Archive: {archive}")
+              lines.append(f"Entries: {len(infos)} (files: {sum(not i.is_dir() for i in infos)}, folders: {sum(i.is_dir() for i in infos)})")
+              lines.append(f"Declared expanded size: {total} bytes")
+              for info in infos:
+                  name = info.filename
+                  p = PurePosixPath(name)
+                  unsafe = name.startswith("/") or ".." in p.parts or "\\\\" in name
+                  if unsafe:
+                      findings.append((name, "Unsafe archive path (path traversal risk)"))
+                      continue
+                  if info.is_dir():
+                      continue
+                  lines.append(f"- {name} ({info.file_size} bytes)")
+                  low = name.lower()
+                  if low.endswith((".env", ".pem", ".key", ".p12", ".pfx")) or "/.ssh/" in low:
+                      findings.append((name, "Potential credentials/key file by filename"))
+                  if low.endswith((".json", ".js", ".ts", ".tsx", ".jsx", ".html", ".yml", ".yaml", ".toml", ".txt", ".md")) and info.file_size <= MAX_FILE:
+                      data = z.read(info)
+                      for label, pattern in secret_patterns:
+                          if pattern.search(data):
+                              findings.append((name, label))
+                  if ("database" in low or "/backups/" in low or low.startswith("data/")):
+                      findings.append((name, "Data/database/backup file: exclude from source upload pending privacy review"))
+                  if info.file_size > MAX_FILE:
+                      findings.append((name, "Large file: not content-scanned"))
+          summary = lines + ["", "## Review flags"]
+          if findings:
+              summary += [f"- {path}: {reason}" for path, reason in findings]
+          else:
+              summary.append("- No filename/content flags found by the basic scan.")
+          summary += ["", "Note: this is a conservative pattern scan, not a guarantee that secrets are absent. No archive files were extracted into the repository and no project code was executed."]
+          text = "\\n".join(summary)
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(text + "\\n")
+          PY
