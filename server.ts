@@ -16,6 +16,19 @@ async function startServer() {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
+  // Baseline browser security headers. HSTS is enabled only for production deployments.
+  app.disable('x-powered-by');
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (isProd) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    next();
+  });
+
   // Trust forwarded client IPs only when the deployment explicitly declares
   // the exact number of trusted proxy hops. Never trust X-Forwarded-For by default.
   const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || '0', 10);
