@@ -26,9 +26,10 @@ const DB_FILE = path.join(DATA_DIR, 'database.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 
 export type StoredRegistrationRequest = RegistrationRequest & { passwordHash: string };
+export type StoredUser = User & { passwordHash: string; authVersion?: number };
 
 export interface DatabaseSchema {
-  users: (User & { passwordHash: string })[];
+  users: StoredUser[];
   registrationRequests: StoredRegistrationRequest[];
   notifications: NotificationItem[];
   subjects: Subject[];
@@ -1012,7 +1013,7 @@ class Database {
               id: 'usr-school-admin',
               username: 'schooladmin',
               name: 'إدارة مدرسة قفلة للتعليم الأساسي',
-              role: 'SchoolAdmin',
+              role: 'SchoolAdmin' as UserRole,
               hasAIAccess: false,
               assignedSubjects: ['all'],
               assignedGrades: ['all'],
@@ -1029,7 +1030,7 @@ class Database {
               id: 'usr-teacher-2',
               username: 'teacher2',
               name: 'أ. فاطمة (معلمة المواد الأساسية)',
-              role: 'Teacher',
+              role: 'Teacher' as UserRole,
               hasAIAccess: false,
               assignedSubjects: allSubjectIds,
               assignedGrades: defaultGrades,
@@ -1290,7 +1291,7 @@ class Database {
   public getUsers(): User[] {
     return this.data.users.map((storedUser) => {
       const { passwordHash, authVersion: _authVersion, ...safeUser } =
-        storedUser as User & { authVersion?: number };
+        storedUser as StoredUser;
       return safeUser;
     });
   }
@@ -1302,7 +1303,7 @@ class Database {
   public findUserById(id: string): User | undefined {
     const user = this.data.users.find((u) => u.id === id);
     if (!user) return undefined;
-    const { passwordHash, authVersion: _authVersion, ...rest } = user as User & { authVersion?: number };
+    const { passwordHash, authVersion: _authVersion, ...rest } = user as StoredUser;
     return rest;
   }
 
@@ -1422,7 +1423,7 @@ class Database {
     this.data.users[idx] = next;
     this.save();
     const { passwordHash: _, authVersion: _authVersion, ...rest } =
-      next as User & { authVersion?: number };
+      next as StoredUser;
     return rest;
   }
 
@@ -1430,7 +1431,7 @@ class Database {
     const user = this.data.users.find((u) => u.id === userId);
     if (!user) return false;
     user.passwordHash = bcrypt.hashSync(newPassword, 10);
-    const versionedUser = user as User & { authVersion?: number };
+    const versionedUser = user as StoredUser;
     versionedUser.authVersion = (Number.isSafeInteger(versionedUser.authVersion) ? versionedUser.authVersion! : 0) + 1;
     this.save();
     return true;
