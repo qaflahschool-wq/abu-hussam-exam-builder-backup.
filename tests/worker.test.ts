@@ -342,3 +342,46 @@ test('Worker stores question images in private R2 under the authenticated owner,
   assert.equal(storedMetadata?.questionId, 'question-123');
   assert.notEqual(storedMetadata?.ownerId, 'attacker-controlled-owner');
 });
+
+test('Worker PDF export requires an authenticated session and uses Browser Run', async () => {
+  const owner = { id: 'owner-pdf-1', username: 'teacher.pdf', role: 'Teacher', status: 'ACTIVE', name: 'PDF Teacher', authVersion: 0 };
+  const token = await signWorkerAuthToken({ id: owner.id, role: owner.role }, SECRET, {
+    getAuthVersion: async () => 0,
+  }, 3600);
+  let captured: Record<string, unknown> | undefined;
+  const browser = {
+    async quickAction(_action: 'pdf', options: Record<string, unknown>) {
+      captured = options;
+      return new Response('%PDF-1.4 test-pdf', {
+        status: 200,
+        headers: { 'content-type': 'application/pdf' },
+      });
+    },
+  };
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/exams/exam-123/export-pdf', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        htmlDocument: '<!DOCTYPE html><html><body><div>Exam</div><script>alert(1)</script></body></html>',
+        mode: 'StudentPaper',
+        filename: 'exam-student.pdf',
+      }),
+    }),
+    { DB: authDatabase(owner) as never, SESSION_SECRET: SECRET, BROWSER: browser },
+  );
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /^%PDF-/);
+  assert.deepEqual(captured?.rejectRequestPattern, ['.*']);
+  assert.equal(String(captured?.html).includes('<script>'), false);
+
+  const denied = await worker.fetch(
+    new Request('https://worker.test/api/worker/exams/exam-123/export-pdf', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ htmlDocument: '<html><body>Exam</body></html>' }),
+    }),
+    { DB: authDatabase(owner) as never, SESSION_SECRET: SECRET, BROWSER: browser },
+  );
+  assert.equal(denied.status, 401);
+});
