@@ -68,6 +68,72 @@ export class D1UserRepository {
     return user;
   }
 
+  async setPasswordHash(userId: string, passwordHash: string, timestamp = new Date().toISOString()): Promise<boolean> {
+    if (!userId || userId.length > 128) throw new Error('Invalid user id');
+    if (typeof passwordHash !== 'string' || passwordHash.length < 20 || passwordHash.length > 256) {
+      throw new Error('Invalid password hash');
+    }
+    const result = await this.database
+      .prepare(
+        "UPDATE app_users SET record_json = json_set(record_json, '$.passwordHash', ?, '$.authVersion', COALESCE(json_extract(record_json, '$.authVersion'), 0) + 1), updated_at = ? WHERE id = ?"
+      )
+      .bind(passwordHash, timestamp, userId)
+      .run();
+    if (!result.success) throw new Error('Failed to update user password');
+    return Number(result.meta?.changes || 0) > 0;
+  }
+
+  async recordLoginSuccess(userId: string, timestamp = new Date().toISOString()): Promise<boolean> {
+    if (!userId || userId.length > 128) throw new Error('Invalid user id');
+    const result = await this.database
+      .prepare(
+        "UPDATE app_users SET record_json = json_set(record_json, '$.failedLoginAttempts', 0, '$.lockedUntil', NULL, '$.lastLoginAt', ?, '$.lastActivityAt', ?), updated_at = ? WHERE id = ?"
+      )
+      .bind(timestamp, timestamp, timestamp, userId)
+      .run();
+    if (!result.success) throw new Error('Failed to record login success');
+    return Number(result.meta?.changes || 0) > 0;
+  }
+
+  async recordLoginFailure(
+    userId: string,
+    maxAttempts = 5,
+    lockDurationMs = 15 * 60 * 1000,
+    now = new Date()
+  ): Promise<{ found: boolean; failedAttempts: number; lockedUntil: string | null }> {
+    if (!userId || userId.length > 128) throw new Error('Invalid user id');
+    if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20) {
+      throw new Error('Invalid maximum login attempts');
+    }
+    if (!Number.isSafeInteger(lockDurationMs) || lockDurationMs < 1000 || lockDurationMs > 24 * 60 * 60 * 1000) {
+      throw new Error('Invalid login lock duration');
+    }
+    const nowIso = now.toISOString();
+    const lockedUntil = new Date(now.getTime() + lockDurationMs).toISOString();
+    const result = await this.database
+      .prepare(
+        "UPDATE app_users SET record_json = json_set(record_json, '$.failedLoginAttempts', " +
+        "COALESCE(json_extract(record_json, '$.failedLoginAttempts'), 0) + 1, " +
+        "'$.lockedUntil', CASE WHEN COALESCE(json_extract(record_json, '$.failedLoginAttempts'), 0) + 1 >= ? " +
+        "THEN ? ELSE json_extract(record_json, '$.lockedUntil') END), updated_at = ? WHERE id = ?"
+      )
+      .bind(maxAttempts, lockedUntil, nowIso, userId)
+      .run();
+    if (!result.success) throw new Error('Failed to record login failure');
+    if (Number(result.meta?.changes || 0) === 0) return { found: false, failedAttempts: 0, lockedUntil: null };
+
+    const row = await this.database
+      .prepare("SELECT json_extract(record_json, '$.failedLoginAttempts') AS failed_attempts, json_extract(record_json, '$.lockedUntil') AS locked_until FROM app_users WHERE id = ? LIMIT 1")
+      .bind(userId)
+      .first<{ failed_attempts: number | null; locked_until: string | null }>();
+    if (!row) return { found: false, failedAttempts: 0, lockedUntil: null };
+    return {
+      found: true,
+      failedAttempts: Number(row.failed_attempts || 0),
+      lockedUntil: row.locked_until || null,
+    };
+  }
+
   async touchActivity(userId: string, timestamp = new Date().toISOString()): Promise<boolean> {
     if (!userId || userId.length > 128) throw new Error('Invalid user id');
     const result = await this.database
