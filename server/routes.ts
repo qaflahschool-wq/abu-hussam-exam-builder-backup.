@@ -1,4 +1,4 @@
-import express, { Response } from 'express';
+import express, { NextFunction, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { db } from './db.js';
 import { geminiService, ExamGenerationRequest } from './gemini.js';
@@ -27,7 +27,7 @@ import {
 
 export const router = express.Router();
 
-function requireAIRateLimit(req: AuthenticatedRequest, res: Response, next: express.NextFunction): void {
+function requireAIRateLimit(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   const userId = req.authUser?.id || 'anonymous';
   const limit = checkSlidingRateLimit(`ai-request:${userId}`, 15, 60 * 1000);
   if (!limit.allowed) {
@@ -850,7 +850,14 @@ router.put('/questions/:id', (req: AuthenticatedRequest, res: Response): void =>
     res.status(403).json({ error: 'غير مصرح لك بتعديل هذا السؤال الخاص' });
     return;
   }
-  const { ownerId: _ignoredOwner, id: _ignoredId, ...safePatch } = req.body;
+  const {
+    ownerId: _ignoredOwner,
+    createdBy: _ignoredCreator,
+    sharedWith: _ignoredShares,
+    id: _ignoredId,
+    createdAt: _ignoredCreatedAt,
+    ...safePatch
+  } = req.body || {};
   if (!canAccessAcademicScope(
     user,
     safePatch.grade || existing.grade,
@@ -2157,7 +2164,7 @@ router.put('/system/users/:id', requireSchoolAdminOrOwner, (req: AuthenticatedRe
     'name', 'role', 'status', 'hasAIAccess', 'assignedSubjects', 'assignedGrades',
     'email', 'phone', 'school', 'reviewNotes', 'delegatedPermissions',
   ];
-  const patch: Record<string, any> = {};
+  const patch: any = {};
   for (const field of allowedUserFields) {
     if (Object.prototype.hasOwnProperty.call(body, field)) {
       patch[field] = body[field];
