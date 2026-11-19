@@ -4406,6 +4406,22 @@ function canAccessOwnedRecord(user, record, mode) {
 
 // server/routes.ts
 var router = express.Router();
+function hasValidExamImagePayload(exam) {
+  if (!Array.isArray(exam?.sections)) return true;
+  let totalBytes = 0;
+  for (const section of exam.sections) {
+    if (!Array.isArray(section?.questions)) continue;
+    for (const question of section.questions) {
+      const image = question?.imageDataUrl;
+      if (image === void 0 || image === null || image === "") continue;
+      if (typeof image !== "string" || !/^data:image\/(?:png|jpeg|webp);base64,/i.test(image)) return false;
+      if (image.length > 4e6) return false;
+      totalBytes += image.length;
+      if (totalBytes > 85e5) return false;
+    }
+  }
+  return true;
+}
 function requireAIRateLimit(req, res, next) {
   const userId = req.authUser?.id || "anonymous";
   const limit = checkSlidingRateLimit(`ai-request:${userId}`, 15, 60 * 1e3);
@@ -5224,6 +5240,10 @@ router.get("/exams/:id", (req, res) => {
 router.post("/exams", (req, res) => {
   const user = req.authUser;
   const exam = req.body;
+  if (!hasValidExamImagePayload(exam)) {
+    res.status(400).json({ error: "\u0625\u062D\u062F\u0649 \u0635\u0648\u0631 \u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629 \u0623\u0648 \u062A\u062C\u0627\u0648\u0632\u062A \u0627\u0644\u0635\u0648\u0631 \u0627\u0644\u062D\u062C\u0645 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647 (8.5 \u0645\u064A\u062C\u0627\u0628\u0627\u064A\u062A)." });
+    return;
+  }
   if (!exam.title || !exam.grade || !exam.sections) {
     res.status(400).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0643\u062A\u0645\u0644\u0629" });
     return;
@@ -5305,6 +5325,10 @@ router.post("/exams", (req, res) => {
 router.put("/exams/:id", (req, res) => {
   const user = req.authUser;
   const existing = db.getExamById(req.params.id);
+  if (!hasValidExamImagePayload(req.body)) {
+    res.status(400).json({ error: "\u0625\u062D\u062F\u0649 \u0635\u0648\u0631 \u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629 \u0623\u0648 \u062A\u062C\u0627\u0648\u0632\u062A \u0627\u0644\u0635\u0648\u0631 \u0627\u0644\u062D\u062C\u0645 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647 (8.5 \u0645\u064A\u062C\u0627\u0628\u0627\u064A\u062A)." });
+    return;
+  }
   if (!existing) {
     res.status(404).json({ error: "\u0627\u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
     return;
