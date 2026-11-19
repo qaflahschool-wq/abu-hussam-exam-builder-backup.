@@ -117,3 +117,33 @@ The new unit tests have been added to the existing `tests/*.test.ts` pattern, bu
 ### Follow-up schema constraint correction
 
 A second pass against migration 0001 confirmed that `created_at` is also `NOT NULL` for `app_users` and `registration_requests`. The D1 adapter now validates these timestamps before issuing SQL, and regression tests cover both missing-timestamp cases. This closes a schema constraint that the first adapter test pass had not covered.
+
+
+## Authentication lifecycle expansion (2026-11-20)
+
+Extended `D1UserRepository` with additional async operations:
+- `setPasswordHash` rotates the password hash and increments `authVersion` in the same SQL update, invalidating prior sessions.
+- `recordLoginSuccess` clears failed-login counters and lockout state and updates login/activity timestamps.
+- `recordLoginFailure` increments failed attempts atomically in SQL and applies a bounded lock duration after the configured threshold.
+- Added validation for user IDs, password-hash shape, attempt thresholds, and lock durations.
+
+Added regression tests for password/session rotation, successful-login reset, failed-login counter behavior, and invalid lockout configuration.
+
+These are repository primitives only. The Worker login endpoint, password comparison, unknown-user/IP throttling, registration workflow, approval transactions, notification/audit side effects, and account status checks still need to be composed and integrated. They do not replace or modify the current Express auth path.
+
+## Deployment decision: NO-GO until migration acceptance gates pass
+
+The user authorized finishing the work and then publishing. Authorization is noted; it does not make an incomplete build safe to publish. Current source inspection confirms:
+- `package.json` still builds `server.ts` as a Node/Express server.
+- `server.ts` imports Node filesystem/path modules and mounts `server/routes.ts`.
+- `server/db.ts` remains a synchronous JSON-file database with filesystem backups and migration-on-read behavior.
+- The current route module calls synchronous `db.*` methods throughout the application. The previously inventoried surface is 67 database methods and 78 Express routes.
+- The new D1 user/token modules are not wired into the running app.
+- There is no complete Cloudflare Worker entrypoint serving the application API and frontend, and no verified D1 import/restore path for existing data.
+- R2 image storage is not yet connected to authenticated routes or the editor.
+- PDF export still depends on local Chromium.
+- CI execution for the latest migration commits has not been verified.
+
+Deploying this state would publish an incomplete Worker or run the existing filesystem-backed app on an unsuitable ephemeral runtime, risking loss of exam/user data and broken authentication or PDF export.
+
+**Release gate:** do not create or deploy a production Worker, change production D1/R2 resources, or route the domain until all API routes are migrated, transactional workflows are tested, data import/rollback is proven, image/PDF workflows pass, CI is green, and a staging end-to-end acceptance run succeeds. Production remains untouched.
