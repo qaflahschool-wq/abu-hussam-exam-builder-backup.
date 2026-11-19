@@ -8,13 +8,9 @@ export interface ClientMeta {
 }
 
 export function getClientMeta(req: Request): ClientMeta {
-  const xff = req.headers['x-forwarded-for'];
-  let ip =
-    typeof xff === 'string'
-      ? xff.split(',')[0].trim()
-      : Array.isArray(xff) && xff.length > 0
-      ? xff[0].trim()
-      : req.ip || req.socket?.remoteAddress || 'unknown';
+  // Express req.ip respects only the proxy chain configured by the server.
+  // Reading X-Forwarded-For directly lets clients spoof their IP and evade limits.
+  let ip = req.ip || req.socket?.remoteAddress || 'unknown';
   if (ip.startsWith('::ffff:')) {
     ip = ip.slice(7);
   }
