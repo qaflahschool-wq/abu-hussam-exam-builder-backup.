@@ -72,6 +72,74 @@ import {
   BookmarkPlus,
 } from 'lucide-react';
 
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:${blob.type || 'application/octet-stream'};base64,${btoa(binary)}`;
+}
+
+async function inlineCssAssetUrls(css: string, stylesheetUrl: string): Promise<string> {
+  const matches = Array.from(css.matchAll(/url\\((['"]?)([^'")]+)\\1\\)/g));
+  let output = css;
+  for (const match of matches) {
+    const original = match[0];
+    const rawUrl = match[2]?.trim();
+    if (!rawUrl || /^(?:data:|blob:|#)/i.test(rawUrl)) continue;
+    try {
+      const resolved = new URL(rawUrl, stylesheetUrl);
+      if (resolved.origin !== window.location.origin) continue;
+      const response = await fetch(resolved.href, { credentials: 'same-origin' });
+      if (!response.ok) continue;
+      const dataUrl = await blobToDataUrl(await response.blob());
+      output = output.replaceAll(original, `url("${dataUrl}")`);
+    } catch {
+      // Missing optional CSS assets fall back to the browser's default font/style.
+    }
+  }
+  return output;
+}
+
+async function buildPdfHeadStyles(): Promise<string> {
+  const nodes = Array.from(document.head.querySelectorAll('link[rel="stylesheet"], style'));
+  const rendered = await Promise.all(nodes.map(async (node) => {
+    if (node.tagName.toLowerCase() !== 'link') return node.outerHTML;
+    const href = (node as HTMLLinkElement).href;
+    try {
+      const url = new URL(href, window.location.href);
+      if (url.origin !== window.location.origin) return '';
+      const response = await fetch(url.href, { credentials: 'same-origin' });
+      if (!response.ok) return '';
+      const css = await inlineCssAssetUrls(await response.text(), url.href);
+      return `<style>${css.replace(/<\\/style/gi, '<\\\\/style')}</style>`;
+    } catch {
+      return '';
+    }
+  }));
+  return rendered.join('\\n');
+}
+
+async function buildPdfSheetsHtml(root: HTMLElement): Promise<string> {
+  if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
+  const clone = root.cloneNode(true) as HTMLElement;
+  const sourceImages = Array.from(root.querySelectorAll('img'));
+  const clonedImages = Array.from(clone.querySelectorAll('img'));
+  await Promise.all(sourceImages.map(async (image, index) => {
+    await image.decode?.().catch(() => undefined);
+    const source = image.currentSrc || image.src;
+    if (!source.startsWith('blob:')) return;
+    try {
+      const response = await fetch(source);
+      if (!response.ok) return;
+      clonedImages[index].src = await blobToDataUrl(await response.blob());
+    } catch {
+      // Keep the original source; the PDF renderer will show a missing image if unavailable.
+    }
+  }));
+  return clone.outerHTML;
+}
+
 interface ExamEditorViewProps {
   exam: Exam;
   initialStudioMode?: 'edit' | 'preview';
@@ -493,12 +561,8 @@ export const ExamEditorView: React.FC<ExamEditorViewProps> = ({
     setExportNotice(null);
 
     try {
-      const sheetsHtml = printPagesRootRef.current.outerHTML;
-      const headNodes = Array.from(
-        document.head.querySelectorAll('link[rel="stylesheet"], style')
-      )
-        .map((node) => node.outerHTML)
-        .join('\n');
+      const sheetsHtml = await buildPdfSheetsHtml(printPagesRootRef.current);
+      const headNodes = await buildPdfHeadStyles();
 
       const { widthMm, heightMm } = getPaperDimensionsMm(layoutConfig.orientation);
       const exportProfile = resolveSubjectPaperProfile(exam.subjectId, subjects, headerConfig.subject);
