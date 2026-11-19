@@ -27,6 +27,21 @@ import {
 
 export const router = express.Router();
 
+function requireAIRateLimit(req: AuthenticatedRequest, res: Response, next: express.NextFunction): void {
+  const userId = req.authUser?.id || 'anonymous';
+  const limit = checkSlidingRateLimit(`ai-request:${userId}`, 15, 60 * 1000);
+  if (!limit.allowed) {
+    res.setHeader('Retry-After', String(limit.retryAfterSec));
+    res.status(429).json({
+      error: 'تم تجاوز الحد المؤقت لطلبات الذكاء الاصطناعي. يرجى الانتظار ثم إعادة المحاولة.',
+      code: 'AI_RATE_LIMITED',
+      retryAfterSec: limit.retryAfterSec,
+    });
+    return;
+  }
+  next();
+}
+
 function hasValidTeacherAssignments(subjects: unknown, grades: unknown): boolean {
   const validSubjects = new Set(db.getSubjects().map((subject) => subject.id));
   const validGrades = new Set(Array.from({ length: 9 }, (_, index) => `Grade ${index + 1}`));
@@ -889,7 +904,7 @@ router.delete('/questions/:id', (req: AuthenticatedRequest, res: Response): void
 });
 
 // AI Single Question Generation — Strictly Owner Only (Never alters Quranic text)
-router.post('/questions/generate', requireAIAccess, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.post('/questions/generate', requireAIAccess, requireAIRateLimit, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { grade, unitTitle, type, difficulty, marks, lessonFocus, sourceCode, educationalLevel, grammarCategory, subjectId } =
     req.body;
 
@@ -1540,7 +1555,7 @@ router.delete('/exams/:id/share/:targetUserId', (req: AuthenticatedRequest, res:
 });
 
 // Full AI Exam Generation — Strictly Owner Only
-router.post('/exams/generate-ai', requireAIAccess, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.post('/exams/generate-ai', requireAIAccess, requireAIRateLimit, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const user = req.authUser!;
   const requestData: ExamGenerationRequest = req.body;
 
@@ -1579,7 +1594,7 @@ router.post('/exams/validate', (req: AuthenticatedRequest, res: Response): void 
 
 // ==================== AI VISION & IMAGE ANALYZER (OWNER ONLY) ====================
 
-router.post('/vision/analyze', requireAIAccess, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.post('/vision/analyze', requireAIAccess, requireAIRateLimit, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { images, gradeHint, unitHint } = req.body;
   if (!images || !Array.isArray(images) || images.length === 0) {
     res.status(400).json({ error: 'يرجى تقديم صورة واحدة على الأقل للتحليل' });
@@ -1596,6 +1611,7 @@ router.post('/vision/analyze', requireAIAccess, async (req: AuthenticatedRequest
 router.post(
   '/vision/generate-questions',
   requireAIAccess,
+  requireAIRateLimit,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const user = req.authUser!;
     const { analysis, grade, contentScope, educationalLevel, selectedQuestionTypes, count, teacherNotes, saveToBank } =
@@ -1628,7 +1644,7 @@ router.post(
   }
 );
 
-router.post('/vision/validate-fidelity', requireAIAccess, (req: AuthenticatedRequest, res: Response): void => {
+router.post('/vision/validate-fidelity', requireAIAccess, requireAIRateLimit, (req: AuthenticatedRequest, res: Response): void => {
   const { question, analysis, contentScope } = req.body;
   if (!question || !analysis) {
     res.status(400).json({ error: 'السؤال وبيانات التحليل مطلوبة لإجراء التحقق من مطابقة المصدر' });
@@ -1659,7 +1675,7 @@ router.get('/documents/:id', requireAIAccess, (req: AuthenticatedRequest, res: R
 });
 
 router.post('/documents', requireAIAccess, (req: AuthenticatedRequest, res: Response): void => {
-  const doc = req.body;
+  const doc = req.body && typeof req.body === 'object' ? req.body : {};
   if (!doc.title || !doc.analysis) {
     res.status(400).json({ error: 'بيانات المستند غير مكتملة' });
     return;
@@ -1751,7 +1767,7 @@ router.get('/ai/models', requireAIAccess, (_req: AuthenticatedRequest, res: Resp
   res.json(geminiService.getAvailableModels());
 });
 
-router.post('/ai/ping', requireAIAccess, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.post('/ai/ping', requireAIAccess, requireAIRateLimit, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { model } = req.body;
   const result = await geminiService.pingTest(model);
   res.json(result);
