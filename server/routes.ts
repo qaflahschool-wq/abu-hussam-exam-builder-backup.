@@ -2135,6 +2135,10 @@ router.post('/system/users', requireSchoolAdminOrOwner, (req: AuthenticatedReque
 
   const resolvedRole =
     role === 'PlatformOwner' ? 'PlatformOwner' : role === 'SchoolAdmin' ? 'SchoolAdmin' : 'Teacher';
+  if (resolvedRole === 'SchoolAdmin' && !isPlatformOwner(actor)) {
+    res.status(403).json({ error: 'إنشاء حسابات إدارة المدرسة محصور بصاحب المنصة' });
+    return;
+  }
   const resolvedAI = isPlatformOwner(actor) && resolvedRole === 'PlatformOwner' ? Boolean(hasAIAccess) : false;
   if (resolvedRole === 'Teacher' && !hasValidTeacherAssignments(assignedSubjects, assignedGrades)) {
     res.status(400).json({ error: 'يجب تحديد مادة وصف دراسي صحيحين للمعلم' });
@@ -2219,6 +2223,10 @@ router.put('/system/users/:id', requireSchoolAdminOrOwner, (req: AuthenticatedRe
     delete patch.status;
     if (patch.role === 'PlatformOwner' || patch.role === 'Administrator') {
       res.status(403).json({ error: 'غير مصرح بالترقية إلى مالك المنصة' });
+      return;
+    }
+    if (patch.role === 'SchoolAdmin' && target.role !== 'SchoolAdmin') {
+      res.status(403).json({ error: 'ترقية الحساب إلى إدارة المدرسة محصورة بصاحب المنصة' });
       return;
     }
   }
