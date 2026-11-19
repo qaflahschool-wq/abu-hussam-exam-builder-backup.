@@ -112,3 +112,8 @@ Unit tests cover public-field redaction, case-insensitive bound lookup, invalid 
 **Still not integrated:** registration approval, password verification/update, failed-login counters and lockouts, status/role checks, security event writes, notification side effects, and the actual Worker request handler. The current Express login and middleware continue to use the synchronous filesystem repository. Do not enable the Worker auth path until these operations have explicit transaction and rate-limit behavior.
 
 The new unit tests have been added to the existing `tests/*.test.ts` pattern, but the latest GitHub status endpoint still reports no CI checks. Execution remains unverified.
+
+
+### Follow-up schema constraint correction
+
+A second pass against migration 0001 confirmed that `created_at` is also `NOT NULL` for `app_users` and `registration_requests`. The D1 adapter now validates these timestamps before issuing SQL, and regression tests cover both missing-timestamp cases. This closes a schema constraint that the first adapter test pass had not covered.
