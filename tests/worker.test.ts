@@ -295,3 +295,50 @@ test('Worker delegates non-API requests to the static asset binding', async () =
   assert.equal(response.status, 200);
   assert.equal(await response.text(), 'asset:/');
 });
+
+test('Worker stores question images in private R2 under the authenticated owner, not body identity', async () => {
+  const owner = { id: 'owner-image-1', username: 'teacher.image', role: 'Teacher', status: 'ACTIVE', name: 'Image Teacher', authVersion: 0 };
+  const token = await signWorkerAuthToken({ id: owner.id, role: owner.role }, SECRET, {
+    getAuthVersion: async () => 0,
+  }, 3600);
+  let storedMetadata: Record<string, string> | undefined;
+  const bucket = {
+    async put(_key: string, _bytes: Uint8Array, options: { customMetadata: Record<string, string> }) {
+      storedMetadata = options.customMetadata;
+    },
+    async get(_key: string) {
+      return { arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+    },
+    async delete(_key: string) {},
+  };
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(..._values: unknown[]) { return this; },
+        async first<T>() {
+          if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+          if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(owner) } as T;
+          return null;
+        },
+        async all<T>() { return { success: true, results: [] as T[] }; },
+        async run() { return { success: true, meta: { changes: 1 } }; },
+      };
+    },
+  };
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/question-images', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ownerId: 'attacker-controlled-owner',
+        questionId: 'question-123',
+        imageDataUrl: 'data:image/png;base64,AQID',
+      }),
+    }),
+    { DB: db as never, QUESTION_IMAGES: bucket as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 201);
+  assert.equal(storedMetadata?.ownerId, owner.id);
+  assert.equal(storedMetadata?.questionId, 'question-123');
+  assert.notEqual(storedMetadata?.ownerId, 'attacker-controlled-owner');
+});
