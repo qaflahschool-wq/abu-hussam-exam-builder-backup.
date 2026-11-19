@@ -91,6 +91,48 @@ export default {
           if (!auth.ok) return json({ error: auth.error }, auth.status);
           return json({ user: auth.user });
         }
+
+        if (url.pathname.startsWith('/api/worker/owner/registration-requests')) {
+          const users = new D1UserRepository(env.DB);
+          const versions = new D1AuthVersionReader(env.DB);
+          const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
+          if (!auth.ok) return json({ error: auth.error }, auth.status);
+          if (!['PlatformOwner', 'Administrator'].includes(String(auth.user.role))) {
+            return json({ error: 'FORBIDDEN' }, 403);
+          }
+
+          if (url.pathname === '/api/worker/owner/registration-requests' && request.method === 'GET') {
+            const status = url.searchParams.get('status') || undefined;
+            return json({ requests: await authService.listRegistrationRequests(status) });
+          }
+
+          const match = url.pathname.match(/^\\/api\\/worker\\/owner\\/registration-requests\\/([^/]+)\\/(approve|reject|needs-edit)$/);
+          if (match && request.method === 'POST') {
+            const requestId = decodeURIComponent(match[1]);
+            const body: unknown = await request.json().catch(() => ({}));
+            const input = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+            if (match[2] === 'approve') {
+              const outcome = await authService.approveRegistrationRequest(requestId, auth.user, {
+                role: typeof input.role === 'string' ? input.role : undefined,
+                assignedSubjects: input.assignedSubjects,
+                assignedGrades: input.assignedGrades,
+                reviewNote: typeof input.reviewNote === 'string' ? input.reviewNote : undefined,
+              });
+              return outcome
+                ? json({ success: true, ...outcome })
+                : json({ error: 'REGISTRATION_NOT_FOUND' }, 404);
+            }
+
+            const reviewNote = typeof input.reviewNote === 'string'
+              ? input.reviewNote
+              : typeof input.reason === 'string' ? input.reason : 'لم تستوفِ البيانات الشروط المطلوبة';
+            const status = match[2] === 'reject' ? 'REJECTED' : 'NEEDS_EDIT';
+            const updated = await authService.reviewRegistrationRequest(requestId, auth.user, status, reviewNote);
+            return updated
+              ? json({ success: true, request: updated })
+              : json({ error: 'REGISTRATION_NOT_FOUND' }, 404);
+          }
+        }
       } catch (error) {
         console.error('Worker authentication request failed', error);
         return json({ error: 'Internal server error' }, 500);
