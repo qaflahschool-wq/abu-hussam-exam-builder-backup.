@@ -1,0 +1,128 @@
+name: Extract reviewed project source
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Separate review branch"
+        required: true
+        default: "review/extracted-source-2026-11-20"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out review branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 1
+
+      - name: Safely extract source files (without running project code)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, re, stat, zipfile
+          from pathlib import PurePosixPath
+
+          archives = [n for n in os.listdir(".") if n.lower().endswith(".zip")]
+          if not archives:
+              raise SystemExit("STOP: No ZIP archive found.")
+          archive = next((n for n in archives if "hussam" in n.lower()), archives[0])
+
+          MAX_ENTRIES = 1000
+          MAX_TOTAL = 100 * 1024 * 1024
+          MAX_FILE = 10 * 1024 * 1024
+          text_ext = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".html", ".css", ".md", ".yml", ".yaml", ".toml", ".lock", ".txt", ".sql"}
+          image_ext = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico"}
+          high_confidence = [
+              ("Private key", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+              ("Google API key", re.compile(rb"AIza[0-9A-Za-z_-]{30,}")),
+              ("GitHub token", re.compile(rb"gh[pousr]_[A-Za-z0-9_]{20,}")),
+              ("AWS access key", re.compile(rb"AKIA[0-9A-Z]{16}")),
+              ("Slack token", re.compile(rb"xox[baprs]-[A-Za-z0-9-]{20,}")),
+          ]
+          literal_secret = re.compile(
+              rb'''(?i)\b(api[_-]?key|secret|password|passwd|access[_-]?token|refresh[_-]?token|client[_-]?secret)\b\s*[:=]\s*(['"])(?!\s*(?:process\.env|import\.meta\.env|env\.|<|your_|replace|changeme|example|placeholder|test|dummy|xxx|\$))[A-Za-z0-9_./+=-]{16,}\2'''
+          )
+          excluded_dirs = {"data", "backups", "node_modules", "dist", "build", ".git", ".next", "coverage"}
+          excluded_names = {".env", ".env.local", ".env.production", ".npmrc", ".pypirc"}
+          excluded_ext = {".pem", ".key", ".p12", ".pfx", ".crt", ".cer", ".der"}
+          included, excluded, flagged = [], [], []
+          with zipfile.ZipFile(archive) as z:
+              infos = z.infolist()
+              if len(infos) > MAX_ENTRIES:
+                  raise SystemExit("STOP: Archive exceeds the entry-count safety limit.")
+              if sum(i.file_size for i in infos) > MAX_TOTAL:
+                  raise SystemExit("STOP: Archive exceeds the expanded-size safety limit.")
+              for info in infos:
+                  name = info.filename
+                  p = PurePosixPath(name)
+                  if name.startswith("/") or ".." in p.parts or chr(92) in name:
+                      raise SystemExit("STOP: Unsafe path detected in archive.")
+                  if info.is_dir():
+                      continue
+                  mode = (info.external_attr >> 16) & 0o170000
+                  if mode == stat.S_IFLNK:
+                      excluded.append((name, "symbolic link"))
+                      continue
+                  parts = [x.lower() for x in p.parts]
+                  low = p.name.lower()
+                  suffix = p.suffix.lower()
+                  if any(x in excluded_dirs for x in parts) or low in excluded_names or low.startswith(".env.") or suffix in excluded_ext:
+                      excluded.append((name, "private data, backup, environment, or key material"))
+                      continue
+                  if suffix not in text_ext | image_ext or info.file_size > MAX_FILE:
+                      excluded.append((name, "unsupported file type or oversized file"))
+                      continue
+                  data = z.read(info)
+                  reasons = []
+                  if suffix in text_ext:
+                      for label, pattern in high_confidence:
+                          if pattern.search(data):
+                              reasons.append(label)
+                      if literal_secret.search(data):
+                          reasons.append("possible literal credential assignment")
+                  if reasons:
+                      flagged.append((name, sorted(set(reasons))))
+                      continue
+                  dest = os.path.abspath(os.path.join(".", *p.parts))
+                  root = os.path.abspath(".")
+                  if not dest.startswith(root + os.sep):
+                      raise SystemExit("STOP: Extraction destination escaped workspace.")
+                  os.makedirs(os.path.dirname(dest), exist_ok=True)
+                  with open(dest, "wb") as f:
+                      f.write(data)
+                  included.append((name, info.file_size))
+
+          print(f"Archive: {archive}")
+          print(f"Extracted safe files: {len(included)}")
+          print(f"Excluded files: {len(excluded)}")
+          print(f"Files quarantined for possible credentials: {len(flagged)}")
+          if flagged:
+              print("QUARANTINED (path and reason only; no secret values printed):")
+              for name, reasons in flagged:
+                  print(f"- {name}: {', '.join(reasons)}")
+          if excluded:
+              print("EXCLUDED:")
+              for name, reason in excluded:
+                  print(f"- {name}: {reason}")
+          print("Project code was not executed; dependencies were not installed.")
+          PY
+
+      - name: Commit extracted files to review branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No extracted source changes to commit."
+          else
+            git commit -m "Extract reviewed project source from ZIP"
+            git push origin HEAD:"${{ inputs.target_branch }}"
+          fi
