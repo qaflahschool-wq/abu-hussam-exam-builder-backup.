@@ -63,7 +63,7 @@ export default {
       return json({ status: 'ok', runtime: 'cloudflare-workers', timestamp: new Date().toISOString() });
     }
 
-    if (url.pathname.startsWith('/api/worker/auth/')) {
+    if (url.pathname.startsWith('/api/worker/auth/') || url.pathname.startsWith('/api/worker/owner/')) {
       if (serviceUnavailable(env)) return json({ error: 'Service unavailable' }, 503);
       try {
         const authService = new WorkerAuthService(env.DB, env.SESSION_SECRET);
