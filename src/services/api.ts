@@ -41,7 +41,7 @@ class ApiService {
   }
 
   private triggerUnauthorized(status: number, url: string) {
-    if (status === 401 && url !== '/api/auth/login') {
+    if (status === 401 && url !== '/api/worker/auth/login') {
       this.unauthorizedHandler?.();
     }
   }
@@ -158,14 +158,14 @@ class ApiService {
   }
 
   async login(username: string, password: string): Promise<{ success: boolean; token: string; user: User }> {
-    return this.request('/api/auth/login', {
+    return this.request('/api/worker/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     });
   }
 
   async getCurrentUser(): Promise<{ user: User }> {
-    return this.request('/api/auth/me');
+    return this.request('/api/worker/auth/me');
   }
 
   async switchUser(userId: string): Promise<{ success: boolean; token: string; user: User }> {
@@ -193,7 +193,7 @@ class ApiService {
     phone?: string;
     notes?: string;
   }): Promise<{ success: boolean; status: string; request: RegistrationRequest; message: string }> {
-    return this.request('/api/auth/register', {
+    return this.request('/api/worker/auth/register', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -610,7 +610,8 @@ class ApiService {
   // Owner Registration Requests, Account Lifecycle & Control Center
   async getRegistrationRequests(status?: string): Promise<RegistrationRequest[]> {
     const q = status ? `?status=${encodeURIComponent(status)}` : '';
-    return this.request(`/api/owner/registration-requests${q}`);
+    const result = await this.request<{ requests: RegistrationRequest[] }>(`/api/worker/owner/registration-requests${q}`);
+    return result.requests || [];
   }
 
   async approveRegistrationRequest(
@@ -622,21 +623,21 @@ class ApiService {
       reviewNote?: string;
     }
   ): Promise<{ success: boolean; request: RegistrationRequest; user: User }> {
-    return this.request(`/api/owner/registration-requests/${id}/approve`, {
+    return this.request(`/api/worker/owner/registration-requests/${encodeURIComponent(id)}/approve`, {
       method: 'POST',
       body: JSON.stringify(overrides || {}),
     });
   }
 
   async rejectRegistrationRequest(id: string, reviewNote: string): Promise<{ success: boolean; request: RegistrationRequest }> {
-    return this.request(`/api/owner/registration-requests/${id}/reject`, {
+    return this.request(`/api/worker/owner/registration-requests/${encodeURIComponent(id)}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reviewNote }),
     });
   }
 
   async requestEditRegistration(id: string, reviewNote: string): Promise<{ success: boolean; request: RegistrationRequest }> {
-    return this.request(`/api/owner/registration-requests/${id}/request-edit`, {
+    return this.request(`/api/worker/owner/registration-requests/${encodeURIComponent(id)}/needs-edit`, {
       method: 'POST',
       body: JSON.stringify({ reviewNote }),
     });
