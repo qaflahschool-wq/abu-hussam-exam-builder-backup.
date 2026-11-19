@@ -67,6 +67,59 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
+
+    if (url.pathname === '/api/worker/catalog/subjects' && request.method === 'GET') {
+      if (!env.DB) return json({ error: 'Catalog unavailable' }, 503);
+      try {
+        const activeOnly = url.searchParams.get('active') === 'true';
+        const result = activeOnly
+          ? await env.DB.prepare('SELECT record_json FROM subjects WHERE is_active = 1 ORDER BY sort_order ASC').all<{ record_json: string }>()
+          : await env.DB.prepare('SELECT record_json FROM subjects ORDER BY sort_order ASC').all<{ record_json: string }>();
+        if (!result.success) return json({ error: 'Catalog unavailable' }, 503);
+        const subjects = (result.results || []).map((row) => {
+          const value: unknown = JSON.parse(row.record_json);
+          if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Malformed subject record');
+          return value;
+        });
+        return json(subjects);
+      } catch (error) {
+        console.error('Worker subject catalog read failed', error);
+        return json({ error: 'Catalog unavailable' }, 500);
+      }
+    }
+
+    if (url.pathname === '/api/worker/school/identity' && request.method === 'GET') {
+      if (!env.DB) return json({ error: 'School identity unavailable' }, 503);
+      try {
+        const row = await env.DB.prepare('SELECT record_json FROM school_settings WHERE singleton_id = 1')
+          .first<{ record_json: string }>();
+        const defaults = {
+          schoolNameAr: 'مدرسة قفلة للتعليم الأساسي',
+          schoolNameEn: 'QAFLAH SCHOOL',
+          countryTitleAr: 'الجمهورية اليمنية',
+          countryTitleEn: 'Republic of Yemen',
+          ministryTitleAr: 'وزارة التربية والتعليم',
+          ministryTitleEn: 'Ministry of Education',
+          logoUrl: '/assets/aistudio/1793675145730_f04991e4.jpg',
+          primaryColor: '#1B5E3A',
+          defaultAcademicYear: '2026 / 2027',
+          defaultTerm: 'الفصل الدراسي الأول',
+          defaultShowTeacherName: true,
+          defaultHeaderLanguage: 'ar',
+          defaultHeaderCompact: false,
+          footerNoteAr: 'مدرسة قفلة للتعليم الأساسي – الجمهورية اليمنية',
+          footerNoteEn: 'QAFLAH BASIC EDUCATION SCHOOL - YEMEN',
+        };
+        if (!row) return json(defaults);
+        const stored: unknown = JSON.parse(row.record_json);
+        if (!stored || typeof stored !== 'object' || Array.isArray(stored)) throw new Error('Malformed school identity');
+        return json({ ...defaults, ...(stored as Record<string, unknown>) });
+      } catch (error) {
+        console.error('Worker school identity read failed', error);
+        return json({ error: 'School identity unavailable' }, 500);
+      }
+    }
+
     if (url.pathname === '/api/worker/health' && request.method === 'GET') {
       return json({ status: 'ok', runtime: 'cloudflare-workers', timestamp: new Date().toISOString() });
     }
