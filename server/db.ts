@@ -1308,7 +1308,7 @@ class Database {
   }
 
   public getAuthVersion(userId: string): number {
-    const user = this.data.users.find((u) => u.id === userId) as (User & { authVersion?: number }) | undefined;
+    const user = this.data.users.find((u) => u.id === userId) as StoredUser | undefined;
     return Number.isSafeInteger(user?.authVersion) && (user?.authVersion as number) >= 0
       ? (user?.authVersion as number)
       : 0;
