@@ -43,6 +43,7 @@ export interface TokenPayload {
   role: string;
   iat: number;
   exp: number;
+  ver: number;
 }
 
 export function signAuthToken(user: User, ttlHours = 24 * 7): string {
@@ -52,6 +53,7 @@ export function signAuthToken(user: User, ttlHours = 24 * 7): string {
     role: user.role,
     iat: now,
     exp: now + ttlHours * 3600,
+    ver: db.getAuthVersion(user.id),
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(encoded).digest('base64url');
@@ -81,6 +83,8 @@ export function verifyAuthToken(token: string): TokenPayload | null {
       payload.userId.length > 128 ||
       !Number.isSafeInteger(payload.iat) ||
       !Number.isSafeInteger(payload.exp) ||
+      !Number.isSafeInteger(payload.ver) ||
+      payload.ver < 0 ||
       payload.iat <= 0 ||
       payload.iat > now + 60 ||
       payload.exp <= now ||
@@ -159,6 +163,11 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   const user = db.findUserById(payload.userId);
   if (!user) {
     res.status(401).json({ error: 'الحساب غير موجود' });
+    return;
+  }
+
+  if (!db.isAuthVersionCurrent(user.id, payload.ver)) {
+    res.status(401).json({ error: 'تم تحديث كلمة مرور الحساب. يرجى تسجيل الدخول مجدداً.' });
     return;
   }
 
