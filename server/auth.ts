@@ -204,6 +204,41 @@ export function userHasAIAccess(user?: User): boolean {
 }
 
 /**
+ * Enforces academic assignment scope on the server.
+ * Administrative roles are unrestricted; teachers must have explicit matching
+ * grade and subject assignments. Missing assignments fail closed.
+ */
+export function canAccessAcademicScope(
+  user: User,
+  grade?: unknown,
+  subjectId?: unknown
+): boolean {
+  if (isSchoolAdminOrOwner(user)) return true;
+
+  const grades = user.assignedGrades;
+  const subjects = user.assignedSubjects;
+  if (!Array.isArray(grades) || grades.length === 0) return false;
+  if (!Array.isArray(subjects) || subjects.length === 0) return false;
+
+  const normalizedGrade = typeof grade === 'string' ? grade.trim() : '';
+  const normalizedSubject = typeof subjectId === 'string' ? subjectId.trim() : '';
+
+  if (
+    normalizedGrade &&
+    !grades.includes('all') &&
+    !grades.includes(normalizedGrade)
+  ) return false;
+
+  if (
+    normalizedSubject &&
+    !subjects.includes('all') &&
+    !subjects.includes(normalizedSubject)
+  ) return false;
+
+  return true;
+}
+
+/**
  * Enforces strict server-side exclusion of Teacher & non-authorized accounts from ALL Gemini/AI endpoints.
  */
 export function requireAIAccess(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
