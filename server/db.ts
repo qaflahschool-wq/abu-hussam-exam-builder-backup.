@@ -1298,7 +1298,7 @@ class Database {
   public findUserById(id: string): User | undefined {
     const user = this.data.users.find((u) => u.id === id);
     if (!user) return undefined;
-    const { passwordHash, ...rest } = user;
+    const { passwordHash, authVersion: _authVersion, ...rest } = user as User & { authVersion?: number };
     return rest;
   }
 
