@@ -12,10 +12,6 @@ import {
   Lock,
   User as UserIcon,
   ArrowLeft,
-  Shield,
-  GraduationCap,
-  Sparkles,
-  Building2,
   UserPlus,
   CheckCircle2,
   Phone,
@@ -237,7 +233,7 @@ export const LoginView: React.FC = () => {
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="مثال: admin أو teacher"
+                      placeholder="أدخل اسم المستخدم"
                       className="w-full pr-10 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E3A]"
                       dir="ltr"
                     />
