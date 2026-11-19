@@ -2,9 +2,9 @@
  * Minimal, parameterized D1 JSON-record store for the Cloudflare migration.
  *
  * This is an isolated infrastructure layer, not a replacement for server/db.ts.
- * The current Express routes call synchronous methods; D1 is asynchronous. Do not
- * wire this into those routes until the service layer and route handlers are
- * converted to async and their callers are covered by integration tests.
+ * The current Express routes call synchronous methods; do not wire this into
+ * those routes until the service layer and route handlers are converted to
+ * async and their callers are covered by integration tests.
  */
 
 export interface D1Result<T = unknown> {
@@ -40,6 +40,91 @@ const COLLECTION_TABLES = {
 
 export type D1CollectionName = keyof typeof COLLECTION_TABLES;
 
+type StoredRecord = Record<string, unknown> & { id: string };
+type ColumnSpec = {
+  name: string;
+  value: (record: StoredRecord) => unknown;
+  required?: boolean;
+};
+
+const commonCreatedAt: ColumnSpec = {
+  name: 'created_at',
+  value: (record) => record.createdAt ?? null,
+};
+
+const commonUpdatedAt: ColumnSpec = {
+  name: 'updated_at',
+  value: (record) => record.updatedAt ?? null,
+};
+
+/**
+ * These projections mirror the non-null and indexed columns in migration 0001.
+ * Keeping this allowlist static prevents record properties from becoming SQL
+ * identifiers. The full domain object remains in record_json.
+ */
+const COLLECTION_COLUMNS: Record<D1CollectionName, ColumnSpec[]> = {
+  users: [
+    { name: 'username', value: (r) => r.username, required: true },
+    { name: 'role', value: (r) => r.role, required: true },
+    { name: 'status', value: (r) => r.status, required: true },
+    commonCreatedAt,
+    commonUpdatedAt,
+  ],
+  registrationRequests: [
+    { name: 'username', value: (r) => r.username, required: true },
+    { name: 'status', value: (r) => r.status, required: true },
+    commonCreatedAt,
+    commonUpdatedAt,
+  ],
+  notifications: [
+    { name: 'user_id', value: (r) => r.userId ?? null },
+    commonCreatedAt,
+  ],
+  subjects: [
+    { name: 'is_active', value: (r) => r.isActive === false ? 0 : 1 },
+    { name: 'sort_order', value: (r) => r.sortOrder ?? 99 },
+  ],
+  curricula: [
+    { name: 'grade', value: (r) => r.grade ?? null },
+    { name: 'subject_id', value: (r) => r.subjectId ?? null },
+  ],
+  questions: [
+    { name: 'owner_id', value: (r) => r.ownerId ?? null },
+    { name: 'subject_id', value: (r) => r.subjectId ?? null },
+    { name: 'grade', value: (r) => r.grade ?? null },
+    { name: 'unit_id', value: (r) => r.unitId ?? null },
+    commonCreatedAt,
+    commonUpdatedAt,
+  ],
+  exams: [
+    { name: 'owner_id', value: (r) => r.ownerId ?? r.createdBy ?? null },
+    { name: 'subject_id', value: (r) => r.subjectId ?? null },
+    { name: 'grade', value: (r) => r.grade ?? null },
+    { name: 'status', value: (r) => r.status ?? null },
+    commonCreatedAt,
+    commonUpdatedAt,
+  ],
+  archive: [
+    { name: 'owner_id', value: (r) => r.ownerId ?? r.createdBy ?? null },
+    { name: 'subject_id', value: (r) => r.subjectId ?? null },
+    { name: 'grade', value: (r) => r.grade ?? null },
+    { name: 'status', value: (r) => r.status ?? null },
+    { name: 'archived_at', value: (r) => r.archivedAt ?? r.updatedAt ?? r.createdAt ?? null },
+  ],
+  layoutTemplates: [
+    { name: 'owner_id', value: (r) => r.ownerId ?? null },
+    commonCreatedAt,
+  ],
+  analyzedDocuments: [
+    { name: 'owner_id', value: (r) => r.ownerId ?? null },
+    commonCreatedAt,
+  ],
+  aiUsageLogs: [
+    { name: 'user_id', value: (r) => r.userId ?? null },
+    { name: 'created_at', value: (r) => r.createdAt ?? r.timestamp ?? null },
+  ],
+};
+
 function parseRecord<T>(raw: unknown): T {
   if (typeof raw !== 'string') {
     throw new Error('D1 record_json is missing or is not text');
@@ -53,7 +138,7 @@ function parseRecord<T>(raw: unknown): T {
 
 /**
  * D1 adapter for collections whose staging schema has (id, record_json).
- * Table identifiers are selected exclusively from the fixed allowlist above;
+ * Table and column identifiers are selected exclusively from static allowlists;
  * all record values are passed as bound parameters.
  */
 export class D1RecordStore {
@@ -78,17 +163,34 @@ export class D1RecordStore {
     return (result.results || []).map((row) => parseRecord<T>(row.record_json));
   }
 
-  async put<T extends { id: string }>(collection: D1CollectionName, record: T): Promise<void> {
+  async put<T extends StoredRecord>(collection: D1CollectionName, record: T): Promise<void> {
     if (!record || typeof record.id !== 'string' || !record.id.trim()) {
       throw new Error('A non-empty record id is required');
     }
+
     const table = COLLECTION_TABLES[collection];
+    const specs = COLLECTION_COLUMNS[collection];
+    const projected = specs.map((spec) => {
+      const value = spec.value(record);
+      if (spec.required && (value === undefined || value === null || value === '')) {
+        throw new Error(`Required D1 field "${spec.name}" is missing for ${collection}`);
+      }
+      return value ?? null;
+    });
+    const columns = ['id', ...specs.map((spec) => spec.name), 'record_json'];
+    const values = [record.id, ...projected, JSON.stringify(record)];
+    const placeholders = columns.map(() => '?').join(', ');
+    const updates = columns
+      .filter((column) => column !== 'id')
+      .map((column) => `${column} = excluded.${column}`)
+      .join(', ');
+
     const result = await this.database
       .prepare(
-        `INSERT INTO ${table} (id, record_json) VALUES (?, ?) ` +
-        'ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json'
+        `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders}) ` +
+        `ON CONFLICT(id) DO UPDATE SET ${updates}`
       )
-      .bind(record.id, JSON.stringify(record))
+      .bind(...values)
       .run();
     if (!result.success) throw new Error('D1 write query failed');
   }
