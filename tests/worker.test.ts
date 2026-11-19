@@ -363,7 +363,7 @@ test('Worker PDF export requires an authenticated session and uses Browser Run',
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        htmlDocument: '<!DOCTYPE html><html><body><div>Exam</div><script>alert(1)</script></body></html>',
+        htmlDocument: '<!DOCTYPE html><html><head><title>Exam</title></head><body><main><h1>School Examination</h1><div>Exam content for PDF rendering.</div><script>alert(1)</script></main></body></html>',
         mode: 'StudentPaper',
         filename: 'exam-student.pdf',
       }),
