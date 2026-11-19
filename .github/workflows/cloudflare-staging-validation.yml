@@ -41,3 +41,6 @@ jobs:
 
       - name: Production bundle build
         run: npm run build
+
+      - name: Cloudflare Worker bundle validation (no deployment)
+        run: npm run worker:dry-run
