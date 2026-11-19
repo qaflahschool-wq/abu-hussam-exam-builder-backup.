@@ -27,6 +27,21 @@ import {
 
 export const router = express.Router();
 
+function hasValidTeacherAssignments(subjects: unknown, grades: unknown): boolean {
+  const validSubjects = new Set(db.getSubjects().map((subject) => subject.id));
+  const validGrades = new Set(Array.from({ length: 9 }, (_, index) => `Grade ${index + 1}`));
+  return (
+    Array.isArray(subjects) &&
+    subjects.length > 0 &&
+    !subjects.includes('all') &&
+    subjects.every((id) => typeof id === 'string' && validSubjects.has(id)) &&
+    Array.isArray(grades) &&
+    grades.length > 0 &&
+    !grades.includes('all') &&
+    grades.every((grade) => typeof grade === 'string' && validGrades.has(grade))
+  );
+}
+
 // ==================== PUBLIC ROUTES ====================
 
 router.get('/health', (_req, res: Response): void => {
@@ -138,12 +153,8 @@ router.post('/auth/register', (req, res: Response): void => {
   const subjectsArr = Array.isArray(assignedSubjects) ? assignedSubjects.map(String) : [];
   const gradesArr = Array.isArray(assignedGrades) ? assignedGrades.map(String) : [];
 
-  if (safeRole === 'Teacher' && subjectsArr.length === 0) {
-    res.status(400).json({ error: 'يرجى تحديد مادة دراسية واحدة على الأقل' });
-    return;
-  }
-  if (safeRole === 'Teacher' && gradesArr.length === 0) {
-    res.status(400).json({ error: 'يرجى تحديد صف دراسي واحد على الأقل' });
+  if (safeRole === 'Teacher' && !hasValidTeacherAssignments(subjectsArr, gradesArr)) {
+    res.status(400).json({ error: 'يجب تحديد مادة وصف دراسي صحيحين من القائمة المسموح بها' });
     return;
   }
 
@@ -2021,6 +2032,10 @@ router.post('/system/users', requireSchoolAdminOrOwner, (req: AuthenticatedReque
   const resolvedRole =
     role === 'PlatformOwner' ? 'PlatformOwner' : role === 'SchoolAdmin' ? 'SchoolAdmin' : 'Teacher';
   const resolvedAI = isPlatformOwner(actor) && resolvedRole === 'PlatformOwner' ? Boolean(hasAIAccess) : false;
+  if (resolvedRole === 'Teacher' && !hasValidTeacherAssignments(assignedSubjects, assignedGrades)) {
+    res.status(400).json({ error: 'يجب تحديد مادة وصف دراسي صحيحين للمعلم' });
+    return;
+  }
 
   try {
     const newUser = db.createUser({
@@ -2096,6 +2111,17 @@ router.put('/system/users/:id', requireSchoolAdminOrOwner, (req: AuthenticatedRe
   }
   if (patch.role === 'Teacher' || patch.role === 'SchoolAdmin') {
     patch.hasAIAccess = false;
+  }
+  const nextRole = patch.role || target.role;
+  if (
+    nextRole === 'Teacher' &&
+    !hasValidTeacherAssignments(
+      patch.assignedSubjects ?? target.assignedSubjects,
+      patch.assignedGrades ?? target.assignedGrades
+    )
+  ) {
+    res.status(400).json({ error: 'يجب تحديد مادة وصف دراسي صحيحين للمعلم' });
+    return;
   }
 
   const updated = db.updateUser(req.params.id, patch);
