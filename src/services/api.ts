@@ -147,7 +147,7 @@ class ApiService {
 
   // Auth & School Public Identity
   async getSchoolIdentity(): Promise<SchoolIdentitySettings> {
-    return this.request('/api/school/identity');
+    return this.request('/api/worker/school/identity');
   }
 
   async updateSchoolIdentity(patch: Partial<SchoolIdentitySettings>): Promise<{ success: boolean; settings: SchoolIdentitySettings }> {
@@ -229,7 +229,7 @@ class ApiService {
   }
 
   async getPublicSubjects(): Promise<Subject[]> {
-    return this.request('/api/subjects/public');
+    return this.request('/api/worker/catalog/subjects?active=true');
   }
 
   // Notifications (Role-scoped)
@@ -252,7 +252,7 @@ class ApiService {
   // Subjects
   async getSubjects(activeOnly = false): Promise<Subject[]> {
     const q = activeOnly ? '?active=true' : '';
-    return this.request(`/api/subjects${q}`);
+    return this.request(`/api/worker/catalog/subjects${q}`);
   }
 
   async createSubject(subject: Partial<Subject>): Promise<{ success: boolean; subject: Subject }> {
