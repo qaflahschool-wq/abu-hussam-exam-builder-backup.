@@ -147,3 +147,18 @@ The user authorized finishing the work and then publishing. Authorization is not
 Deploying this state would publish an incomplete Worker or run the existing filesystem-backed app on an unsuitable ephemeral runtime, risking loss of exam/user data and broken authentication or PDF export.
 
 **Release gate:** do not create or deploy a production Worker, change production D1/R2 resources, or route the domain until all API routes are migrated, transactional workflows are tested, data import/rollback is proven, image/PDF workflows pass, CI is green, and a staging end-to-end acceptance run succeeds. Production remains untouched.
+
+
+## Worker request authentication guard (2026-11-20)
+
+Added `server/cloudflare/workerAuthGuard.ts` as the next authentication vertical-slice primitive:
+- Extracts only a bounded Bearer token from the Authorization header.
+- Verifies the HMAC token and current D1 `authVersion`.
+- Loads the current public user record from D1.
+- Rejects missing users, inactive accounts, and role changes since token issuance.
+- Ignores client-provided identity/role headers entirely.
+- Returns a discriminated result with 401/403 status semantics for a future Worker router.
+
+Added focused tests for active-user authentication, forged identity headers, stale auth versions, inactive users, role mismatch, and deleted users.
+
+**Integration boundary remains explicit:** this helper is not mounted in an actual Worker fetch handler, and does not by itself migrate Express routes or implement login/password verification. A production API still requires the complete async route/service conversion, rate limiting for known and unknown usernames/IPs, registration and approval transactions, security audit/notification behavior, and runtime tests with real D1 bindings.
