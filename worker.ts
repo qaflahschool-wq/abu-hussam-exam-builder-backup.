@@ -1,5 +1,6 @@
 import { D1AuthVersionReader } from './server/cloudflare/d1AuthVersionReader.js';
 import { D1UserRepository } from './server/cloudflare/d1UserRepository.js';
+import { WorkerAuthService } from './server/cloudflare/workerAuthService.js';
 import { authenticateWorkerRequest } from './server/cloudflare/workerAuthGuard.js';
 
 interface Env {
@@ -33,13 +34,22 @@ const json = (body: unknown, status = 200): Response =>
 function corsHeaders(request: Request): Headers {
   const headers = new Headers();
   const origin = request.headers.get('Origin');
-  // No wildcard CORS: browser origins must be explicitly configured in a later
-  // deployment binding. Same-origin requests need no Access-Control-Allow-Origin.
+  // Same-origin is the intended deployment. Cross-origin access remains denied
+  // until an explicit production origin allowlist is configured.
   if (origin) headers.set('Vary', 'Origin');
-  headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   headers.set('Access-Control-Max-Age', '600');
   return headers;
+}
+
+function clientIp(request: Request): string {
+  const value = request.headers.get('CF-Connecting-IP') || '';
+  return value.slice(0, 128) || 'unknown';
+}
+
+function serviceUnavailable(env: Env): boolean {
+  return !env.DB || typeof env.SESSION_SECRET !== 'string' || env.SESSION_SECRET.length < 32;
 }
 
 export default {
@@ -53,18 +63,36 @@ export default {
       return json({ status: 'ok', runtime: 'cloudflare-workers', timestamp: new Date().toISOString() });
     }
 
-    if (url.pathname === '/api/worker/auth/me' && request.method === 'GET') {
-      if (!env.DB || typeof env.SESSION_SECRET !== 'string' || env.SESSION_SECRET.length < 32) {
-        return json({ error: 'Service unavailable' }, 503);
-      }
+    if (url.pathname.startsWith('/api/worker/auth/')) {
+      if (serviceUnavailable(env)) return json({ error: 'Service unavailable' }, 503);
       try {
-        const users = new D1UserRepository(env.DB);
-        const versions = new D1AuthVersionReader(env.DB);
-        const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
-        if (!auth.ok) return json({ error: auth.error }, auth.status);
-        return json({ user: auth.user });
+        const authService = new WorkerAuthService(env.DB, env.SESSION_SECRET);
+
+        if (url.pathname === '/api/worker/auth/register' && request.method === 'POST') {
+          const body: unknown = await request.json().catch(() => null);
+          const result = await authService.register(
+            body,
+            clientIp(request),
+            request.headers.get('User-Agent') || '',
+          );
+          return json(result.body, result.status);
+        }
+
+        if (url.pathname === '/api/worker/auth/login' && request.method === 'POST') {
+          const body: unknown = await request.json().catch(() => null);
+          const result = await authService.login(body, clientIp(request));
+          return json(result.body, result.status);
+        }
+
+        if (url.pathname === '/api/worker/auth/me' && request.method === 'GET') {
+          const users = new D1UserRepository(env.DB);
+          const versions = new D1AuthVersionReader(env.DB);
+          const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
+          if (!auth.ok) return json({ error: auth.error }, auth.status);
+          return json({ user: auth.user });
+        }
       } catch (error) {
-        console.error('Worker auth lookup failed', error);
+        console.error('Worker authentication request failed', error);
         return json({ error: 'Internal server error' }, 500);
       }
     }
