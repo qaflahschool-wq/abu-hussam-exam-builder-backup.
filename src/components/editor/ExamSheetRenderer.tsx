@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { api } from '../../services/api.ts';
 import {
   Exam,
   ExamHeaderConfig,
@@ -46,6 +47,41 @@ import {
   Lock,
   Scissors,
 } from 'lucide-react';
+
+
+const PrivateQuestionImage: React.FC<{
+  imageStorageId?: string;
+  imageDataUrl?: string;
+  alt: string;
+  style?: React.CSSProperties;
+  className?: string;
+}> = ({ imageStorageId, imageDataUrl, alt, style, className }) => {
+  const [source, setSource] = useState<string>(imageDataUrl || '');
+
+  useEffect(() => {
+    if (!imageStorageId) {
+      setSource(imageDataUrl || '');
+      return;
+    }
+    let active = true;
+    let objectUrl = '';
+    setSource('');
+    api.getQuestionImageBlob(imageStorageId).then((blob) => {
+      if (!active) return;
+      objectUrl = URL.createObjectURL(blob);
+      setSource(objectUrl);
+    }).catch((error) => {
+      console.error('Question image could not be loaded', error);
+    });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageStorageId, imageDataUrl]);
+
+  if (!source) return <span className="text-xs text-slate-400">جاري تحميل الصورة...</span>;
+  return <img src={source} alt={alt} style={style} className={className} />;
+};
 
 export const hasArabicText = (text?: string): boolean => Boolean(text && /[\u0600-\u06FF]/.test(text));
 
@@ -756,10 +792,11 @@ export const QuestionCardBlockView: React.FC<QuestionBlockRenderProps> = ({
             )}
 
             {/* Attached Image */}
-            {q.imageDataUrl && (
+            {(q.imageDataUrl || q.imageStorageId) && (
               <div className="exam-question-image-block avoid-break-inside py-2 flex flex-col items-center gap-1">
-                <img
-                  src={q.imageDataUrl}
+                <PrivateQuestionImage
+                  imageStorageId={q.imageStorageId}
+                  imageDataUrl={q.imageDataUrl}
                   alt={q.imageCaption || 'شكل توضيحي'}
                   style={{ width: `${q.imageWidthPercent || 60}%`, maxWidth: '100%' }}
                   className="exam-question-image rounded border border-slate-300 object-contain max-h-[420px]"
@@ -779,7 +816,10 @@ export const QuestionCardBlockView: React.FC<QuestionBlockRenderProps> = ({
                     />
                     <button
                       type="button"
-                      onClick={() => callbacks?.onUpdateQuestion?.(sIdx, qIdx, { imageDataUrl: undefined })}
+                      onClick={() => {
+                        if (q.imageStorageId) void api.deleteQuestionImage(q.imageStorageId).catch(console.error);
+                        callbacks?.onUpdateQuestion?.(sIdx, qIdx, { imageDataUrl: undefined, imageStorageId: undefined });
+                      }}
                       className="text-rose-600 hover:underline font-bold"
                     >
                       إزالة الصورة
