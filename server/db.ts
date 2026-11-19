@@ -987,7 +987,15 @@ class Database {
           }
 
           const salt = bcrypt.genSaltSync(10);
-          if (!parsed.users.some((u: any) => u.id === 'usr-school-admin' || u.role === 'SchoolAdmin')) {
+          const isProduction = process.env.NODE_ENV === 'production';
+          const bootstrapSchoolAdminPassword =
+            process.env.BOOTSTRAP_SCHOOL_ADMIN_PASSWORD || (isProduction ? '' : 'school123');
+          const bootstrapTeacherPassword =
+            process.env.BOOTSTRAP_TEACHER_PASSWORD || (isProduction ? '' : 'teacher123');
+          if (
+            bootstrapSchoolAdminPassword &&
+            !parsed.users.some((u: any) => u.id === 'usr-school-admin' || u.role === 'SchoolAdmin')
+          ) {
             parsed.users.push({
               id: 'usr-school-admin',
               username: 'schooladmin',
@@ -999,12 +1007,12 @@ class Database {
               email: 'admin@qaflah.edu.ye',
               school: 'مدرسة قفلة للتعليم الأساسي',
               createdAt: new Date().toISOString(),
-              passwordHash: bcrypt.hashSync('school123', salt),
+              passwordHash: bcrypt.hashSync(bootstrapSchoolAdminPassword, salt),
             });
             modified = true;
           }
 
-          if (!parsed.users.some((u: any) => u.id === 'usr-teacher-2')) {
+          if (bootstrapTeacherPassword && !parsed.users.some((u: any) => u.id === 'usr-teacher-2')) {
             parsed.users.push({
               id: 'usr-teacher-2',
               username: 'teacher2',
@@ -1016,7 +1024,7 @@ class Database {
               email: 'fatima@qaflah.edu.ye',
               school: 'مدرسة قفلة للتعليم الأساسي',
               createdAt: new Date().toISOString(),
-              passwordHash: bcrypt.hashSync('teacher123', salt),
+              passwordHash: bcrypt.hashSync(bootstrapTeacherPassword, salt),
             });
             modified = true;
           }
@@ -1088,11 +1096,21 @@ class Database {
       }
     }
 
-    // Hash default passwords
+    // Production accounts must be bootstrapped with operator-provided secrets.
+    // Weak demo credentials are retained only for local development.
+    const isProduction = process.env.NODE_ENV === 'production';
+    const ownerPassword = process.env.BOOTSTRAP_OWNER_PASSWORD || (isProduction ? '' : 'admin123');
+    if (ownerPassword.length < 12 && isProduction) {
+      throw new Error('BOOTSTRAP_OWNER_PASSWORD must be configured (at least 12 characters) before first production startup.');
+    }
+    const schoolAdminPassword =
+      process.env.BOOTSTRAP_SCHOOL_ADMIN_PASSWORD || (isProduction ? '' : 'school123');
+    const teacherPassword =
+      process.env.BOOTSTRAP_TEACHER_PASSWORD || (isProduction ? '' : 'teacher123');
+    const teacher2Password =
+      process.env.BOOTSTRAP_TEACHER2_PASSWORD || (isProduction ? '' : teacherPassword);
     const salt = bcrypt.genSaltSync(10);
-    const adminHash = bcrypt.hashSync('admin123', salt);
-    const schoolAdminHash = bcrypt.hashSync('school123', salt);
-    const teacherHash = bcrypt.hashSync('teacher123', salt);
+    const adminHash = bcrypt.hashSync(ownerPassword, salt);
 
     const initialDb: DatabaseSchema = {
       users: [
@@ -1110,7 +1128,7 @@ class Database {
           createdAt: new Date().toISOString(),
           passwordHash: adminHash,
         },
-        {
+        ...(schoolAdminPassword ? [{
           id: 'usr-school-admin',
           username: 'schooladmin',
           name: 'إدارة مدرسة قفلة للتعليم الأساسي',
@@ -1128,9 +1146,9 @@ class Database {
           email: 'admin@qaflah.edu.ye',
           school: 'مدرسة قفلة للتعليم الأساسي',
           createdAt: new Date().toISOString(),
-          passwordHash: schoolAdminHash,
-        },
-        {
+          passwordHash: bcrypt.hashSync(schoolAdminPassword, salt),
+        }] : []),
+        ...(teacherPassword ? [{
           id: 'usr-teacher',
           username: 'teacher',
           name: 'أ. محمد (معلم اللغة الإنجليزية)',
@@ -1142,9 +1160,9 @@ class Database {
           email: 'teacher.english@qaflah.edu.ye',
           school: 'مدرسة قفلة للتعليم الأساسي',
           createdAt: new Date().toISOString(),
-          passwordHash: teacherHash,
-        },
-        {
+          passwordHash: bcrypt.hashSync(teacherPassword, salt),
+        }] : []),
+        ...(teacher2Password ? [{
           id: 'usr-teacher-2',
           username: 'teacher2',
           name: 'أ. فاطمة (معلمة المواد الأساسية)',
@@ -1156,8 +1174,8 @@ class Database {
           email: 'fatima@qaflah.edu.ye',
           school: 'مدرسة قفلة للتعليم الأساسي',
           createdAt: new Date().toISOString(),
-          passwordHash: teacherHash,
-        },
+          passwordHash: bcrypt.hashSync(teacher2Password, salt),
+        }] : []),
       ],
       registrationRequests: [],
       notifications: [],
@@ -1288,8 +1306,14 @@ class Database {
       role: safeRole,
       status: user.status || ('ACTIVE' as const),
       hasAIAccess: safeRole === 'PlatformOwner' ? Boolean(user.hasAIAccess) : false,
-      assignedSubjects: user.assignedSubjects || this.getSubjects().map((s) => s.id),
-      assignedGrades: user.assignedGrades || [...ALL_BASIC_GRADES],
+      assignedSubjects:
+        safeRole === 'Teacher'
+          ? (Array.isArray(user.assignedSubjects) ? user.assignedSubjects : [])
+          : ['all'],
+      assignedGrades:
+        safeRole === 'Teacher'
+          ? (Array.isArray(user.assignedGrades) ? user.assignedGrades : [])
+          : ['all'],
       email: user.email,
       phone: user.phone,
       school: user.school || this.data.schoolSettings?.schoolNameAr || 'مدرسة قفلة للتعليم الأساسي',
