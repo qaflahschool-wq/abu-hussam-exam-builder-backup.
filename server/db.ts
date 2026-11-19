@@ -1098,7 +1098,10 @@ class Database {
 
         return parsed;
       } catch (err) {
-        console.error('Error reading database file, loading default seeds:', err);
+        console.error('Error reading database file:', err);
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error('Database file is unreadable. Refusing to replace existing data with a fresh seed database.');
+        }
       }
     }
 
