@@ -1098,6 +1098,34 @@ class Database {
           });
         }
 
+        // Rotate or disable legacy demo accounts that still use known default passwords.
+        if (process.env.NODE_ENV === 'production' && Array.isArray(parsed.users)) {
+          const legacyAccounts = [
+            { username: 'admin', password: 'admin123', env: 'BOOTSTRAP_OWNER_PASSWORD', required: true },
+            { username: 'schooladmin', password: 'school123', env: 'BOOTSTRAP_SCHOOL_ADMIN_PASSWORD', required: false },
+            { username: 'teacher', password: 'teacher123', env: 'BOOTSTRAP_TEACHER_PASSWORD', required: false },
+            { username: 'teacher2', password: 'teacher123', env: 'BOOTSTRAP_TEACHER2_PASSWORD', required: false },
+          ];
+
+          for (const legacy of legacyAccounts) {
+            const account = parsed.users.find(
+              (u: any) => String(u.username || '').toLowerCase() === legacy.username
+            );
+            if (!account?.passwordHash || !bcrypt.compareSync(legacy.password, account.passwordHash)) continue;
+
+            const replacement = process.env[legacy.env];
+            if (replacement && replacement.length >= 12) {
+              account.passwordHash = bcrypt.hashSync(replacement, 10);
+              modified = true;
+            } else if (legacy.required) {
+              throw new Error('The production owner account still uses a demo password. Configure BOOTSTRAP_OWNER_PASSWORD to rotate it.');
+            } else if (account.status !== 'SUSPENDED') {
+              account.status = 'SUSPENDED';
+              modified = true;
+            }
+          }
+        }
+
         if (modified) {
           this.saveDataDirect(parsed);
         }
