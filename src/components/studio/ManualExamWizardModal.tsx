@@ -805,7 +805,7 @@ export const ManualExamWizardModal: React.FC<ManualExamWizardModalProps> = ({ on
                         <span>{q.imageDataUrl ? 'تغيير صورة السؤال' : 'إرفاق صورة بالسؤال'}</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/png,image/jpeg,image/webp"
                           className="hidden"
                           onChange={(e) => {
                             const f = e.target.files?.[0];
