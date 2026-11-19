@@ -112,7 +112,7 @@ async function buildPdfHeadStyles(): Promise<string> {
       const response = await fetch(url.href, { credentials: 'same-origin' });
       if (!response.ok) return '';
       const css = await inlineCssAssetUrls(await response.text(), url.href);
-      return `<style>${css.replace(/<\\/style/gi, '<\\\\/style')}</style>`;
+      return `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`;
     } catch {
       return '';
     }
