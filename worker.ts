@@ -72,7 +72,7 @@ export default {
     }
 
 
-    const pdfRoute = url.pathname.match(/^\\/api\\/worker\\/exams\\/([A-Za-z0-9_-]{1,128})\\/export-pdf$/);
+    const pdfRoute = url.pathname.match(/^\/api\/worker\/exams\/([A-Za-z0-9_-]{1,128})\/export-pdf$/);
     if (pdfRoute && request.method === 'POST') {
       if (serviceUnavailable(env) || !env.BROWSER) return json({ error: 'PDF rendering unavailable' }, 503);
       try {
@@ -90,11 +90,11 @@ export default {
         }
         const mode = input.mode === 'TeacherAnswerKey' ? 'TeacherAnswerKey' : 'StudentPaper';
         const html = input.htmlDocument
-          .replace(/<\\/?(?:script|iframe|object|embed|base|form)\\b[^>]*>/gi, '')
-          .replace(/<link\\b[^>]*>/gi, '')
+          .replace(/<\/?(?:script|iframe|object|embed|base|form)\b[^>]*>/gi, '')
+          .replace(/<link\b[^>]*>/gi, '')
           .replace(/\\s+on[a-z]+\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)/gi, '')
-          .replace(/@import\\s+[^;]+;?/gi, '')
-          .replace(/url\\(\\s*(['"]?)(?:https?:|javascript:|file:|data:text/html)[^)]*\\)/gi, 'none')
+          .replace(/@import\s+[^;]+;?/gi, '')
+          .replace(/url\(\s*(['"]?)(?:https?:|javascript:|file:|data:text\/html)[^)]*\)/gi, 'none')
           .replace(/\\s+(?:src|href)\\s*=\\s*(['"])https?:[^'"]*\\1/gi, '');
         const rate = await env.DB.prepare(
           "INSERT INTO auth_rate_limits (bucket_key, window_started_at, attempts, locked_until) VALUES (?, ?, 1, NULL) " +
@@ -109,7 +109,7 @@ export default {
           rejectRequestPattern: ['.*'],
         });
         if (!pdf.ok) return json({ error: 'PDF rendering failed' }, 502);
-        const filename = typeof input.filename === 'string' && /^[A-Za-z0-9._-]{1,100}\\.pdf$/i.test(input.filename)
+        const filename = typeof input.filename === 'string' && /^[A-Za-z0-9._-]{1,100}\.pdf$/i.test(input.filename)
           ? input.filename
           : `exam-${mode === 'TeacherAnswerKey' ? 'answer-key' : 'student'}.pdf`;
         return new Response(pdf.body, {
