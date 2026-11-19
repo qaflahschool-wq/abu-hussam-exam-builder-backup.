@@ -80,3 +80,5 @@ A live, temporary probe was also executed against the isolated staging D1 databa
 - R2 image storage remains an isolated service; authenticated upload/read/replace/delete endpoints and editor integration are not complete.
 - PDF generation still depends on local Chromium and has not been ported or validated through Browser Rendering.
 - No production data has been imported and no production resource has been changed.
+
+A follow-up disposable D1 batch exercised the generated insert-column shape for all 11 generic collections (`app_users`, `registration_requests`, `notifications`, `subjects`, `curricula`, `questions`, `exams`, `archived_exams`, `layout_templates`, `analyzed_documents`, and `ai_usage_logs`). Each insert and read-back succeeded; all probe rows were deleted in the same batch. A subsequent count check confirmed the user, registration, question, and exam tables remained empty. This was a direct staging-schema smoke test, not execution of the TypeScript unit tests or full CI.
