@@ -403,7 +403,8 @@ router.post('/auth/login', (req, res: Response): void => {
   clearLoginFailureWindow(lockKey);
   clearLoginFailureWindow(unknownIpKey);
   db.recordUserLoginSuccess(user.id);
-  const { passwordHash: _, ...safeUser } = db.findUserByUsername(cleanUsername)!;
+  const { passwordHash: _, authVersion: _authVersion, ...safeUser } =
+    db.findUserByUsername(cleanUsername)! as any;
   const token = signAuthToken(safeUser);
 
   recordSecurityEvent({
