@@ -292,7 +292,8 @@ export interface Question {
   scrambledWords?: string[]; // For Rearrange
   mathFormula?: string; // For Mathematical Problems / Scientific notations
   tableData?: QuestionTableData; // For Tables & Diagrams
-  imageDataUrl?: string; // Teacher-inserted manual image (Base64 data URL)
+  imageDataUrl?: string; // Legacy/local image data URL during migration
+  imageStorageId?: string; // Private Cloudflare R2 object reference
   imageCaption?: string;
   imageWidthPercent?: number;
   answerSpaceLines?: number; // 0..10 lines for student answer space
