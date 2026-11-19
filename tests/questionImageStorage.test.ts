@@ -10,7 +10,6 @@ import type { D1Database, D1PreparedStatement } from '../server/cloudflare/d1Rec
 function createImageMocks() {
   const objects = new Map<string, Uint8Array>();
   const calls: { sql: string; values: unknown[] }[] = [];
-  let selectedOwner = 'owner-1';
   const bucket: R2Bucket = {
     async put(key, bytes) { objects.set(key, new Uint8Array(bytes)); },
     async get(key): Promise<R2ObjectBody | null> {
@@ -28,12 +27,10 @@ function createImageMocks() {
         async first<T>() {
           calls.push({ sql, values });
           if (sql.includes('FROM question_images')) {
-            if (values[1] !== selectedOwner) return null;
             const id = String(values[0]);
-            const row = Array.from(objects.keys()).find((key) => key.includes(id));
-            // Upload keys intentionally use a separate random ID, so reads use
-            // the captured SQL metadata row below.
-            return metadataRows.get(id) as T || null;
+            const row = metadataRows.get(id);
+            if (!row || row.owner_id !== String(values[1])) return null;
+            return row as T;
           }
           return null;
         },
@@ -42,6 +39,7 @@ function createImageMocks() {
           calls.push({ sql, values });
           if (sql.startsWith('INSERT INTO question_images')) {
             metadataRows.set(String(values[0]), {
+              owner_id: String(values[1]),
               object_key: String(values[3]),
               content_type: String(values[4]),
               byte_size: Number(values[5]),
@@ -52,12 +50,11 @@ function createImageMocks() {
       };
     },
   };
-  const metadataRows = new Map<string, { object_key: string; content_type: string; byte_size: number }>();
+  const metadataRows = new Map<string, { owner_id: string; object_key: string; content_type: string; byte_size: number }>();
   return {
     storage: new QuestionImageStorage(bucket, database),
     objects,
     calls,
-    setSelectedOwner(value: string) { selectedOwner = value; },
   };
 }
 
@@ -129,9 +126,7 @@ test('reads only images owned by the authenticated user', async () => {
     contentType: 'image/webp',
     bytes: new Uint8Array([7, 8, 9]),
   });
-  mocks.setSelectedOwner('another-owner');
   assert.equal(await mocks.storage.getForOwner(metadata.id, 'another-owner'), null);
-  mocks.setSelectedOwner('owner-1');
   const loaded = await mocks.storage.getForOwner(metadata.id, 'owner-1');
   assert.ok(loaded);
   assert.equal(loaded.contentType, 'image/webp');
