@@ -203,3 +203,13 @@ The owner route checks the signed token against the current D1 user and auth ver
 Migration 0003 was applied to the isolated staging D1 database and verified: the migration marker exists, the durable rate-limit table exists, eight canonical subjects are present, and both user and registration tables remain empty. This is a schema/configuration change only; no user or production data was imported or changed.
 
 **Validation caveat:** endpoint tests have been added, but the latest commit still has no confirmed GitHub CI result and no deployed Worker runtime smoke test. The Worker is not deployed, and no staging session secret has been configured. Therefore this authentication slice is committed and its D1 schema is applied, but it is not yet a verified live sign-in service.
+
+
+### Frontend authentication, R2 image API, and Browser Run PDF slice (2026-11-20)
+
+- The frontend API client now routes login, current-session lookup, registration, and owner registration list/approve/reject/request-edit calls to Worker endpoints. The rest of the API client remains on the Express path until each route family is migrated.
+- The Vite app is configured as Worker static assets with SPA fallback; /api/* requests execute the Worker first.
+- Wrangler now binds the isolated staging R2 bucket as QUESTION_IMAGES. Worker image routes authenticate the session, derive owner ID from the verified D1 user, validate image MIME/size and question ID, and provide private owner-scoped read/delete. Frontend question-image handlers upload compressed images to R2 and store the returned image ID instead of a Base64 payload; the renderer fetches a private image as an authenticated Blob.
+- Wrangler now declares Browser Run binding BROWSER. The Worker PDF route requires an authenticated session, limits payload size and per-user request rate, strips script/embed/form elements and external resource references, and calls Browser Run's pdf Quick Action. The frontend PDF export now targets this Worker endpoint.
+
+Outstanding acceptance items: execute lint/tests/build and Wrangler dry-run; deploy only to isolated staging after review; configure the staging-only SESSION_SECRET; run authenticated registration/login, image upload/read/delete and PDF rendering smoke tests; verify Arabic fonts, RTL, images, page breaks, and A4 layout; migrate existing Base64 images; migrate all remaining Express routes and data; build and verify backup/restore round-trip. No Worker deployment, live login, PDF render, bulk data import, or production cutover has been confirmed.
