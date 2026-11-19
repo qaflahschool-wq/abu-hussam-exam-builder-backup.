@@ -188,3 +188,18 @@ Added a first executable authentication slice on the staging branch:
 **Important scope boundary:** this is not yet the complete authentication lifecycle. Owner approval/rejection and atomic user creation, password reset/change, security audit and notification parity, and registration management routes remain unimplemented. The endpoints have been committed but not yet validated by a successful CI run or a staging Worker runtime smoke test. Migration 0003 has not been applied to staging D1. Do not use these endpoints until the migration is applied and tests pass.
 
 The existing Express login/register routes remain unchanged and continue to use the JSON-file database. The Worker endpoints are separate staging paths; no production traffic has been switched.
+
+### Worker account approval and review (2026-11-20)
+
+The Worker authentication slice now also includes owner-only registration management:
+
+- `GET /api/worker/owner/registration-requests` lists requests and strips password hashes.
+- `POST /api/worker/owner/registration-requests/:id/approve` verifies a current owner session and creates the active user while updating the request in a single D1 batch. The bcrypt hash from signup is reused; no plaintext password is stored or returned.
+- `POST .../:id/reject` and `POST .../:id/needs-edit` update review state.
+- A partial unique index prevents concurrent duplicate pending registration names.
+
+The owner route checks the signed token against the current D1 user and auth version, then requires `PlatformOwner` or `Administrator`. Teacher assignments are revalidated against active D1 subjects and Grade 1–9. School-admin permissions are set by the server, not by client input.
+
+Migration 0003 was applied to the isolated staging D1 database and verified: the migration marker exists, the durable rate-limit table exists, eight canonical subjects are present, and both user and registration tables remain empty. This is a schema/configuration change only; no user or production data was imported or changed.
+
+**Validation caveat:** endpoint tests have been added, but the latest commit still has no confirmed GitHub CI result and no deployed Worker runtime smoke test. The Worker is not deployed, and no staging session secret has been configured. Therefore this authentication slice is committed and its D1 schema is applied, but it is not yet a verified live sign-in service.
