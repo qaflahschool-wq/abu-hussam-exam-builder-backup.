@@ -27,6 +27,23 @@ import {
 
 export const router = express.Router();
 
+function hasValidExamImagePayload(exam: any): boolean {
+  if (!Array.isArray(exam?.sections)) return true;
+  let totalBytes = 0;
+  for (const section of exam.sections) {
+    if (!Array.isArray(section?.questions)) continue;
+    for (const question of section.questions) {
+      const image = question?.imageDataUrl;
+      if (image === undefined || image === null || image === '') continue;
+      if (typeof image !== 'string' || !/^data:image\/(?:png|jpeg|webp);base64,/i.test(image)) return false;
+      if (image.length > 4_000_000) return false;
+      totalBytes += image.length;
+      if (totalBytes > 8_500_000) return false;
+    }
+  }
+  return true;
+}
+
 function requireAIRateLimit(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   const userId = req.authUser?.id || 'anonymous';
   const limit = checkSlidingRateLimit(`ai-request:${userId}`, 15, 60 * 1000);
@@ -986,6 +1003,10 @@ router.get('/exams/:id', (req: AuthenticatedRequest, res: Response): void => {
 router.post('/exams', (req: AuthenticatedRequest, res: Response): void => {
   const user = req.authUser!;
   const exam = req.body;
+  if (!hasValidExamImagePayload(exam)) {
+    res.status(400).json({ error: 'إحدى صور الاختبار غير صالحة أو تجاوزت الصور الحجم الإجمالي المسموح به (8.5 ميجابايت).' });
+    return;
+  }
   if (!exam.title || !exam.grade || !exam.sections) {
     res.status(400).json({ error: 'بيانات الاختبار غير مكتملة' });
     return;
@@ -1070,6 +1091,10 @@ router.post('/exams', (req: AuthenticatedRequest, res: Response): void => {
 router.put('/exams/:id', (req: AuthenticatedRequest, res: Response): void => {
   const user = req.authUser!;
   const existing = db.getExamById(req.params.id);
+  if (!hasValidExamImagePayload(req.body)) {
+    res.status(400).json({ error: 'إحدى صور الاختبار غير صالحة أو تجاوزت الصور الحجم الإجمالي المسموح به (8.5 ميجابايت).' });
+    return;
+  }
   if (!existing) {
     res.status(404).json({ error: 'الاختبار غير موجود' });
     return;
