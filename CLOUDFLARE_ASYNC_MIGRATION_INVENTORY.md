@@ -82,3 +82,17 @@ A live, temporary probe was also executed against the isolated staging D1 databa
 - No production data has been imported and no production resource has been changed.
 
 A follow-up disposable D1 batch exercised the generated insert-column shape for all 11 generic collections (`app_users`, `registration_requests`, `notifications`, `subjects`, `curricula`, `questions`, `exams`, `archived_exams`, `layout_templates`, `analyzed_documents`, and `ai_usage_logs`). Each insert and read-back succeeded; all probe rows were deleted in the same batch. A subsequent count check confirmed the user, registration, question, and exam tables remained empty. This was a direct staging-schema smoke test, not execution of the TypeScript unit tests or full CI.
+
+
+## Worker authentication foundation (2026-11-20)
+
+Added a Worker-native authentication foundation without changing the existing Express authentication path:
+
+- `server/cloudflare/workerAuth.ts` implements HMAC-SHA256 token signing and verification using Web Crypto, TextEncoder/TextDecoder, and base64url. It validates identity bounds, token lifetime, issued-at/expiry, signature, and auth-version equality.
+- `server/cloudflare/d1AuthVersionReader.ts` reads `authVersion` asynchronously from the private `app_users.record_json` field using a bound user ID. Missing users and malformed stored versions fail closed; legacy records with no version use version 0, matching the existing filesystem repository.
+- `tests/workerAuth.test.ts` covers valid tokens, tampering, expiry, invalid lifetimes, and version invalidation.
+- `tests/d1AuthVersionReader.test.ts` covers bound lookups, legacy records, invalid versions, and missing users.
+
+**Integration status:** these modules are isolated foundations only. The current `server/auth.ts` still imports Node crypto, filesystem, Express, and the synchronous `db` singleton. The current `requireAuth` middleware still performs synchronous user lookup and activity updates. Do not route production or staging traffic through the new token functions until an async D1 user repository, user-status lookup, activity update, and Worker request middleware are implemented together.
+
+**CI status:** GitHub currently reports no status checks and no workflow run associated with the latest commit. Therefore the new TypeScript tests have not been confirmed as executed. No test pass is claimed.
