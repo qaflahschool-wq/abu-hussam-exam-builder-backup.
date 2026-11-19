@@ -96,3 +96,19 @@ Added a Worker-native authentication foundation without changing the existing Ex
 **Integration status:** these modules are isolated foundations only. The current `server/auth.ts` still imports Node crypto, filesystem, Express, and the synchronous `db` singleton. The current `requireAuth` middleware still performs synchronous user lookup and activity updates. Do not route production or staging traffic through the new token functions until an async D1 user repository, user-status lookup, activity update, and Worker request middleware are implemented together.
 
 **CI status:** GitHub currently reports no status checks and no workflow run associated with the latest commit. Therefore the new TypeScript tests have not been confirmed as executed. No test pass is claimed.
+
+
+## Async D1 user repository (2026-11-20)
+
+Added `server/cloudflare/d1UserRepository.ts` as the next authentication vertical slice:
+
+- `findPublicById` retrieves a user by bound ID and strips both `passwordHash` and internal `authVersion` before returning it.
+- `findForLoginByUsername` validates the username format, performs a case-insensitive bound lookup, and requires a structurally valid stored password hash.
+- `touchActivity` uses SQLite `json_set` to update last activity and the indexed `updated_at` timestamp without replacing the complete user document.
+- Malformed stored user records and malformed login credentials fail closed.
+
+Unit tests cover public-field redaction, case-insensitive bound lookup, invalid usernames, malformed records/credentials, and activity updates.
+
+**Still not integrated:** registration approval, password verification/update, failed-login counters and lockouts, status/role checks, security event writes, notification side effects, and the actual Worker request handler. The current Express login and middleware continue to use the synchronous filesystem repository. Do not enable the Worker auth path until these operations have explicit transaction and rate-limit behavior.
+
+The new unit tests have been added to the existing `tests/*.test.ts` pattern, but the latest GitHub status endpoint still reports no CI checks. Execution remains unverified.
