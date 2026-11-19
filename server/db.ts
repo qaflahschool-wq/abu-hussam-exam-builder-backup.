@@ -812,10 +812,16 @@ class Database {
 
   private ensureDirs() {
     if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
     }
     if (!fs.existsSync(BACKUP_DIR)) {
-      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+      fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 0o700 });
+    }
+    try {
+      fs.chmodSync(DATA_DIR, 0o700);
+      fs.chmodSync(BACKUP_DIR, 0o700);
+    } catch {
+      // Some filesystems do not support POSIX permission modes.
     }
   }
 
@@ -1224,7 +1230,8 @@ class Database {
   private saveDataDirect(data: DatabaseSchema) {
     try {
       const tempPath = `${DB_FILE}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode: 0o600 });
+      try { fs.chmodSync(tempPath, 0o600); } catch { /* ignore unsupported permission changes */ }
       fs.renameSync(tempPath, DB_FILE);
     } catch (err) {
       console.error('Failed to save database atomically:', err);
@@ -2122,7 +2129,8 @@ class Database {
   public createBackup(): string {
     const filename = `backup-qaflah-${Date.now()}.json`;
     const filepath = path.join(BACKUP_DIR, filename);
-    fs.writeFileSync(filepath, JSON.stringify(this.data, null, 2), 'utf-8');
+    fs.writeFileSync(filepath, JSON.stringify(this.data, null, 2), { encoding: 'utf-8', mode: 0o600 });
+    try { fs.chmodSync(filepath, 0o600); } catch { /* ignore unsupported permission changes */ }
     return filename;
   }
 
