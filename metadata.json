@@ -1,0 +1,6 @@
+{
+  "name": "ABU HUSSAM EXAM BUILDER",
+  "description": "AI-Powered Examination Management System for Qaflah Basic Education School - English Subject for Grades 7, 8, and 9 (Yemen).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

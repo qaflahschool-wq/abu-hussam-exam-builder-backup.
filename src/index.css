@@ -1,0 +1,233 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --primary: #0f2537;
+    --primary-light: #1e3a5f;
+    --accent-gold: #d97706;
+    --accent-gold-light: #fbbf24;
+  }
+
+  html, body {
+    overflow-x: clip;
+    width: 100%;
+    height: auto;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: 'Cairo', 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .font-english {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    direction: ltr;
+    text-align: left;
+    unicode-bidi: isolate;
+  }
+
+  .font-arabic {
+    font-family: 'Cairo', system-ui, -apple-system, sans-serif;
+    direction: rtl;
+    text-align: right;
+    unicode-bidi: isolate;
+  }
+
+  .font-amiri {
+    font-family: 'Amiri', 'Cairo', serif;
+    unicode-bidi: isolate;
+  }
+
+  /* Safe Area Support for iPhone and Modern Android */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 16px);
+  }
+
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Exam Paper Viewport Container — Fluid Block Flow (Never centered-flex clipping) */
+.a4-viewport-wrapper {
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+  padding: 4px 0 20px 0;
+}
+
+.a4-print-pages-root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.a4-print-sheet {
+  background: #ffffff;
+  color: #020617;
+  box-sizing: border-box;
+  position: relative;
+}
+
+/* Touch Friendly Utilities */
+.touch-target-min {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Print Styles for Exam Papers & A4 PDF Export */
+@media print {
+  html, body {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Reset all app layout wrappers so multi-page pagination flows freely */
+  .app-shell-root,
+  .app-shell-body,
+  .app-shell-main,
+  .a4-viewport-wrapper,
+  .a4-print-pages-root {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    position: static !important;
+    transform: none !important;
+  }
+
+  .no-print,
+  nav,
+  aside,
+  header,
+  .sidebar,
+  .mobile-nav,
+  .mobile-bottom-bar,
+  button,
+  .toast,
+  .dialog-overlay {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .a4-print-sheet {
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
+    zoom: 1 !important;
+    transform: none !important;
+    overflow: hidden !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid-page !important;
+  }
+
+  .a4-print-sheet:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  .exam-page-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    transform: none !important;
+    zoom: 1 !important;
+    overflow: visible !important;
+  }
+
+  /* Never lock an entire exam section into break-inside: avoid */
+  .exam-section-block {
+    display: block !important;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Keep section heading attached to its instructions / first question */
+  .exam-section-header-group {
+    break-after: avoid-page !important;
+    page-break-after: avoid !important;
+    break-inside: avoid-page !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Allow long reading passages to split cleanly across pages if needed */
+  .exam-passage-block {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    overflow: visible !important;
+  }
+
+  .exam-passage-label {
+    break-after: avoid-page !important;
+    page-break-after: avoid !important;
+  }
+
+  /* Keep individual standard question cards intact; let ultra-long cards flow */
+  .exam-question-card {
+    break-inside: avoid-page !important;
+    page-break-inside: avoid !important;
+    overflow: visible !important;
+  }
+
+  .exam-question-card-long {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    overflow: visible !important;
+  }
+
+  .page-break-before {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .page-break-after {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .avoid-break-inside {
+    page-break-inside: avoid !important;
+    break-inside: avoid-page !important;
+  }
+}
