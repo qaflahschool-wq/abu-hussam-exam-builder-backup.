@@ -582,11 +582,12 @@ export const QuestionCardBlockView: React.FC<QuestionBlockRenderProps> = ({
                   <span>صورة</span>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
                       if (f) callbacks.onUploadImage?.(sIdx, qIdx, f);
+                      e.currentTarget.value = '';
                     }}
                   />
                 </label>
@@ -756,12 +757,12 @@ export const QuestionCardBlockView: React.FC<QuestionBlockRenderProps> = ({
 
             {/* Attached Image */}
             {q.imageDataUrl && (
-              <div className="py-1 flex flex-col items-center gap-1">
+              <div className="exam-question-image-block avoid-break-inside py-2 flex flex-col items-center gap-1">
                 <img
                   src={q.imageDataUrl}
                   alt={q.imageCaption || 'شكل توضيحي'}
                   style={{ width: `${q.imageWidthPercent || 60}%`, maxWidth: '100%' }}
-                  className="rounded border border-slate-300 object-contain max-h-56"
+                  className="exam-question-image rounded border border-slate-300 object-contain max-h-[420px]"
                 />
                 {q.imageCaption && <span className="text-[0.8em] text-slate-600">{q.imageCaption}</span>}
                 {!readOnly && (
