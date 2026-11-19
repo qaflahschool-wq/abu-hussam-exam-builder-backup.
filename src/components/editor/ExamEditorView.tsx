@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { api } from '../../services/api.ts';
+import { prepareQuestionImage } from '../../utils/questionImage.ts';
 import { useAuth } from '../../context/AuthContext.tsx';
 import {
   Exam,
@@ -1169,17 +1170,17 @@ export const ExamEditorView: React.FC<ExamEditorViewProps> = ({
     setExam({ ...exam, sections: recalcSectionMarks(newSecs) });
   };
 
-  const handleUploadQuestionImage = (sIdx: number, qIdx: number, file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        updateQuestion(sIdx, qIdx, {
-          imageDataUrl: reader.result,
-          imageWidthPercent: exam.sections[sIdx].questions[qIdx].imageWidthPercent || 60,
-        });
-      }
-    };
-    reader.readAsDataURL(file);
+  const handleUploadQuestionImage = async (sIdx: number, qIdx: number, file: File) => {
+    try {
+      const imageDataUrl = await prepareQuestionImage(file);
+      updateQuestion(sIdx, qIdx, {
+        imageDataUrl,
+        imageWidthPercent: exam.sections[sIdx]?.questions[qIdx]?.imageWidthPercent || 60,
+        keepTogether: true,
+      });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'تعذر رفع الصورة.');
+    }
   };
 
   const handleApplyDefaultAnswerLinesToAll = (lines: number) => {
