@@ -1646,12 +1646,12 @@ router.post('/vision/validate-fidelity', requireAIAccess, (req: AuthenticatedReq
 
 router.get('/documents', requireAIAccess, (req: AuthenticatedRequest, res: Response): void => {
   const uid = req.authUser!.id;
-  res.json(db.getAnalyzedDocuments().filter((d) => !d.ownerId || d.ownerId === uid));
+  res.json(db.getAnalyzedDocuments().filter((d) => d.ownerId === uid));
 });
 
 router.get('/documents/:id', requireAIAccess, (req: AuthenticatedRequest, res: Response): void => {
   const doc = db.getAnalyzedDocumentById(req.params.id);
-  if (!doc || (doc.ownerId && doc.ownerId !== req.authUser!.id)) {
+  if (!doc || doc.ownerId !== req.authUser!.id) {
     res.status(404).json({ error: 'المستند غير موجود' });
     return;
   }
@@ -1664,13 +1664,21 @@ router.post('/documents', requireAIAccess, (req: AuthenticatedRequest, res: Resp
     res.status(400).json({ error: 'بيانات المستند غير مكتملة' });
     return;
   }
-  const saved = db.saveAnalyzedDocument({ ...doc, ownerId: req.authUser!.id });
+  if (doc.id) {
+    const existing = db.getAnalyzedDocumentById(String(doc.id));
+    if (existing && existing.ownerId !== req.authUser!.id) {
+      res.status(403).json({ error: 'لا تملك صلاحية تعديل هذا المستند' });
+      return;
+    }
+  }
+  const { ownerId: _ignoredOwner, ...safeDocument } = doc;
+  const saved = db.saveAnalyzedDocument({ ...safeDocument, ownerId: req.authUser!.id });
   res.json({ success: true, document: saved });
 });
 
 router.delete('/documents/:id', requireAIAccess, (req: AuthenticatedRequest, res: Response): void => {
   const doc = db.getAnalyzedDocumentById(req.params.id);
-  if (doc && doc.ownerId && doc.ownerId !== req.authUser!.id) {
+  if (doc && doc.ownerId !== req.authUser!.id) {
     res.status(403).json({ error: 'غير مصرح بحذف هذا المستند' });
     return;
   }
@@ -2127,9 +2135,18 @@ router.put('/system/users/:id', requireSchoolAdminOrOwner, (req: AuthenticatedRe
     return;
   }
 
-  const patch: any = { ...req.body };
-  delete patch.passwordHash;
-  delete patch.id;
+  // Explicit allowlist prevents mass assignment and accidental plaintext credential storage.
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const allowedUserFields = [
+    'name', 'role', 'status', 'hasAIAccess', 'assignedSubjects', 'assignedGrades',
+    'email', 'phone', 'school', 'reviewNotes', 'delegatedPermissions',
+  ];
+  const patch: Record<string, any> = {};
+  for (const field of allowedUserFields) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      patch[field] = body[field];
+    }
+  }
 
   if (!isPlatformOwner(actor)) {
     delete patch.hasAIAccess;
