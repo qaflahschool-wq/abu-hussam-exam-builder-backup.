@@ -118,6 +118,10 @@ test('rejects user records missing schema-required fields before querying', asyn
     () => new D1RecordStore(database).put('users', { id: 'u-2', role: 'Teacher', status: 'ACTIVE' }),
     /Required D1 field "username" is missing/
   );
+  await assert.rejects(
+    () => new D1RecordStore(database).put('users', { id: 'u-2', username: 'teacher.two', role: 'Teacher', status: 'ACTIVE' }),
+    /Required D1 field "created_at" is missing/
+  );
   assert.equal(calls.length, 0);
 });
 
@@ -131,6 +135,10 @@ test('upserts a registration request with required indexed columns', async () =>
   });
   assert.equal(tables.registration_requests[0].username, 'new.teacher');
   assert.equal(tables.registration_requests[0].status, 'PENDING_APPROVAL');
+  await assert.rejects(
+    () => new D1RecordStore(database).put('registrationRequests', { id: 'r-2', username: 'new.two', status: 'PENDING_APPROVAL' }),
+    /Required D1 field "created_at" is missing/
+  );
 });
 
 test('rejects empty ids before querying', async () => {
