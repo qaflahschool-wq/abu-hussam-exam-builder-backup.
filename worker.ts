@@ -6,6 +6,7 @@ import { authenticateWorkerRequest } from './server/cloudflare/workerAuthGuard.j
 interface Env {
   DB: D1Database;
   SESSION_SECRET: string;
+  ASSETS?: { fetch(request: Request): Promise<Response> };
 }
 
 interface D1Result<T = unknown> {
@@ -57,6 +58,10 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders(request) });
+    }
+
+    if (!url.pathname.startsWith('/api/') && env.ASSETS) {
+      return env.ASSETS.fetch(request);
     }
 
     if (url.pathname === '/api/worker/health' && request.method === 'GET') {
