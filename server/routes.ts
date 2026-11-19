@@ -1786,16 +1786,17 @@ router.get('/ai/settings', requireAIAccess, (_req: AuthenticatedRequest, res: Re
 router.post('/ai/settings', requireAIAccess, (req: AuthenticatedRequest, res: Response): void => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const patch: any = {};
+  const availableModelIds = new Set(geminiService.getAvailableModels().map((model) => model.id));
 
   if (Object.prototype.hasOwnProperty.call(body, 'primaryModel')) {
-    if (typeof body.primaryModel !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(body.primaryModel)) {
+    if (typeof body.primaryModel !== 'string' || !availableModelIds.has(body.primaryModel)) {
       res.status(400).json({ error: 'اسم النموذج الأساسي غير صالح' });
       return;
     }
     patch.primaryModel = body.primaryModel;
   }
   if (Object.prototype.hasOwnProperty.call(body, 'fallbackModel')) {
-    if (typeof body.fallbackModel !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(body.fallbackModel)) {
+    if (typeof body.fallbackModel !== 'string' || !availableModelIds.has(body.fallbackModel)) {
       res.status(400).json({ error: 'اسم النموذج الاحتياطي غير صالح' });
       return;
     }
