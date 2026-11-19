@@ -52,6 +52,12 @@ const commonCreatedAt: ColumnSpec = {
   value: (record) => record.createdAt ?? null,
 };
 
+const requiredCreatedAt: ColumnSpec = {
+  name: 'created_at',
+  value: (record) => record.createdAt,
+  required: true,
+};
+
 const commonUpdatedAt: ColumnSpec = {
   name: 'updated_at',
   value: (record) => record.updatedAt ?? null,
@@ -67,13 +73,13 @@ const COLLECTION_COLUMNS: Record<D1CollectionName, ColumnSpec[]> = {
     { name: 'username', value: (r) => r.username, required: true },
     { name: 'role', value: (r) => r.role, required: true },
     { name: 'status', value: (r) => r.status, required: true },
-    commonCreatedAt,
+    requiredCreatedAt,
     commonUpdatedAt,
   ],
   registrationRequests: [
     { name: 'username', value: (r) => r.username, required: true },
     { name: 'status', value: (r) => r.status, required: true },
-    commonCreatedAt,
+    requiredCreatedAt,
     commonUpdatedAt,
   ],
   notifications: [
