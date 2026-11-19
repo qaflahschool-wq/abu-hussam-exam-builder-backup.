@@ -999,6 +999,12 @@ class Database {
           const bootstrapTeacherPassword =
             process.env.BOOTSTRAP_TEACHER_PASSWORD || (isProduction ? '' : 'teacher123');
           if (
+            isProduction &&
+            [bootstrapSchoolAdminPassword, bootstrapTeacherPassword].some((value) => value && value.length < 12)
+          ) {
+            throw new Error('Production bootstrap passwords must be at least 12 characters.');
+          }
+          if (
             bootstrapSchoolAdminPassword &&
             !parsed.users.some((u: any) => u.id === 'usr-school-admin' || u.role === 'SchoolAdmin')
           ) {
@@ -1118,6 +1124,12 @@ class Database {
       process.env.BOOTSTRAP_TEACHER_PASSWORD || (isProduction ? '' : 'teacher123');
     const teacher2Password =
       process.env.BOOTSTRAP_TEACHER2_PASSWORD || (isProduction ? '' : teacherPassword);
+    if (
+      isProduction &&
+      [schoolAdminPassword, teacherPassword, teacher2Password].some((value) => value && value.length < 12)
+    ) {
+      throw new Error('Production bootstrap passwords must be at least 12 characters.');
+    }
     const salt = bcrypt.genSaltSync(10);
     const adminHash = bcrypt.hashSync(ownerPassword, salt);
 
