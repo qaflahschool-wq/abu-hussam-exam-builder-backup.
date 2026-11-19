@@ -1286,6 +1286,22 @@ var Database = class {
       id: current.id,
       passwordHash: current.passwordHash
     };
+    const sensitiveFields = [
+      "role",
+      "status",
+      "hasAIAccess",
+      "assignedSubjects",
+      "assignedGrades",
+      "delegatedPermissions"
+    ];
+    const permissionsChanged = sensitiveFields.some(
+      (field) => JSON.stringify(current[field]) !== JSON.stringify(next[field])
+    );
+    if (permissionsChanged) {
+      const versionedNext = next;
+      const currentVersion = Number.isSafeInteger(versionedNext.authVersion) ? versionedNext.authVersion : 0;
+      versionedNext.authVersion = currentVersion + 1;
+    }
     if (next.role === "Teacher" || next.role === "SchoolAdmin") {
       next.hasAIAccess = false;
     }
