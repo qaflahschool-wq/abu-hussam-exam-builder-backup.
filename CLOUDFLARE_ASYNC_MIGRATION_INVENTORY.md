@@ -162,3 +162,15 @@ Added `server/cloudflare/workerAuthGuard.ts` as the next authentication vertical
 Added focused tests for active-user authentication, forged identity headers, stale auth versions, inactive users, role mismatch, and deleted users.
 
 **Integration boundary remains explicit:** this helper is not mounted in an actual Worker fetch handler, and does not by itself migrate Express routes or implement login/password verification. A production API still requires the complete async route/service conversion, rate limiting for known and unknown usernames/IPs, registration and approval transactions, security audit/notification behavior, and runtime tests with real D1 bindings.
+
+
+## Initial Worker API entrypoint added (2026-11-20)
+
+Added a minimal API-only module Worker at `worker.ts` plus isolated `wrangler.jsonc` configuration:
+- `GET /api/worker/health` reports the Worker runtime.
+- `GET /api/worker/auth/me` authenticates a Bearer token against the D1 auth-version reader and current user repository, returning only public user fields.
+- Unknown routes return 404; missing/weak staging secret fails closed; responses are marked no-store.
+- Added entrypoint tests for health, authenticated identity redaction, missing token, and missing secret.
+- Configuration targets only the already-created isolated staging D1 database, disables `workers.dev`, and defines no production route or R2 binding.
+
+This is a deliberately narrow Worker foundation, not a complete app deployment. Login and registration are not implemented in Worker yet; neither are the 78 Express API routes, Vite static assets, R2 upload endpoints, PDF rendering, or data migration. Wrangler is not yet pinned in package dependencies, and the Worker-runtime tests have not been run in Miniflare/Cloudflare. Do not deploy or route production traffic to this entrypoint.
