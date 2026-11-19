@@ -1,19 +1,32 @@
-# D1 migration 0001 — staging record store
+# Cloudflare staging database migration
 
-This migration creates the first durable D1 schema for the Cloudflare staging workstream.
+## Current state
 
-## Design
-- Preserves the existing application record shape in validated JSON columns while the repository is converted from synchronous filesystem calls to asynchronous D1 operations.
-- Adds relational columns for identity, ownership, filtering, and common sort paths.
-- Keeps users, registration requests, AI settings, and audit records in separate tables.
-- Does not store Gemini API keys or other environment secrets in these records.
-- Question image payloads are intentionally not redesigned here; the later R2 migration must move image bytes to private objects and replace embedded data URLs with object metadata.
+The D1 staging schema is in [0001_initial_d1_schema.sql](./0001_initial_d1_schema.sql). The application itself still uses the synchronous in-memory/local-JSON `Database` class in `server/db.ts`; Express route handlers call its methods synchronously throughout `server/routes.ts`.
+
+Cloudflare D1 is accessed asynchronously through Worker bindings. Replacing the current database object with an asynchronous implementation without changing its callers would break request behavior. The existing Express entry point also depends on Node APIs and cannot be deployed unchanged as a Worker.
+
+## Adapter added
+
+`server/cloudflare/d1RecordStore.ts` is a small, allowlisted D1 adapter for collection records stored as `id` + `record_json`. It uses parameter binding for values and does not accept arbitrary SQL table names. It is intentionally not imported by `server/db.ts` or `server/routes.ts` yet.
+
+Tests in `tests/d1RecordStore.test.ts` exercise bound IDs, JSON parsing, list/upsert/delete, and invalid input with a mock D1 binding.
+
+## Required conversion before integration
+
+1. Inventory every `db.*` call in `server/routes.ts` and classify reads/writes and ownership checks.
+2. Introduce async service interfaces and convert route handlers and middleware call chains to await them.
+3. Implement transactional multi-record operations and preserve audit-log append-only/hash-chain semantics.
+4. Move backups and restore into explicit export/import services; do not model backups as a mutable table.
+5. Move AI settings into a singleton configuration record without storing provider secrets in D1.
+6. Add D1 migration tests against a real local/preview D1 database, not only mocks.
+7. Add a dry-run JSON importer that reports counts, duplicate IDs, invalid rows, and relationship mismatches before any write.
+8. Move question image bytes from data URLs into private R2 objects and persist object keys plus ownership metadata.
+9. Convert the Express API to Worker request handlers (or separately justify a containerized Node service) and replace local Chromium PDF generation with Browser Run.
+10. Run end-to-end tests for auth, roles, registration, exams, question images, Arabic/RTL PDFs, backups, and audit integrity.
 
 ## Safety
-- Additive schema only; no production resource is referenced.
-- Applying this migration to the isolated staging D1 database is a separate, explicit operation.
-- No user data is imported by this SQL file.
-- Do not mark the application Cloudflare-ready until the async repository adapter, import/dry-run reconciliation, R2 image flow, Worker API, and integration tests exist.
 
-## Apply later
-Use the Cloudflare D1 migration mechanism against the database named `abu-hussam-exam-builder-staging` only. Verify the database UUID before applying. Never target `hussam-infographic-prod`.
+- This is staging-only groundwork. No D1 migration has been applied and no user data has been imported.
+- Do not connect this adapter to production or the live application yet.
+- Keep the original JSON file and archive untouched until a verified import and restore test is complete.
