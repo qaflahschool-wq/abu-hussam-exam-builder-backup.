@@ -5,6 +5,7 @@ coverage/
 
 # Runtime data, credentials, and local environment
 data/
+backups/
 .env
 .env.*
 !.env.example
