@@ -137,6 +137,8 @@ export default {
         const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
         if (!auth.ok) return json({ error: auth.error }, auth.status);
         const storage = new QuestionImageStorage(env.QUESTION_IMAGES, env.DB);
+        const ownerId = typeof auth.user.id === 'string' ? auth.user.id : '';
+        if (!ownerId) return json({ error: 'Invalid authenticated user' }, 401);
 
         if (url.pathname === '/api/worker/question-images' && request.method === 'POST') {
           const length = Number(request.headers.get('Content-Length') || 0);
@@ -154,7 +156,7 @@ export default {
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
           const metadata = await storage.upload({
-            ownerId: auth.user.id,
+            ownerId,
             questionId,
             contentType: match[1],
             bytes,
@@ -164,7 +166,7 @@ export default {
 
         const imageMatch = url.pathname.match(/^\/api\/worker\/question-images\/([A-Za-z0-9_-]{1,128})$/);
         if (imageMatch && request.method === 'GET') {
-          const image = await storage.getForOwner(imageMatch[1], auth.user.id);
+          const image = await storage.getForOwner(imageMatch[1], ownerId);
           if (!image) return json({ error: 'Image not found' }, 404);
           return new Response(image.bytes, {
             headers: {
@@ -176,7 +178,7 @@ export default {
           });
         }
         if (imageMatch && request.method === 'DELETE') {
-          const deleted = await storage.deleteForOwner(imageMatch[1], auth.user.id);
+          const deleted = await storage.deleteForOwner(imageMatch[1], ownerId);
           return deleted ? json({ success: true }) : json({ error: 'Image not found' }, 404);
         }
         return json({ error: 'Not found' }, 404);
