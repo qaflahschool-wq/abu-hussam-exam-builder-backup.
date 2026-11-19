@@ -35,7 +35,7 @@ jobs:
           node-version: 22
 
       - name: Install dependencies without lifecycle scripts
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: npm install --ignore-scripts --no-audit --no-fund
 
       - name: TypeScript validation
         run: npm run lint
