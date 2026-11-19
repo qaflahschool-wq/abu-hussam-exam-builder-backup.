@@ -1199,6 +1199,10 @@ router.post('/exams/:id/approve', (req: AuthenticatedRequest, res: Response): vo
     res.status(404).json({ error: 'الاختبار غير موجود' });
     return;
   }
+  if (!canAccessAcademicScope(user, exam.grade, exam.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
+    return;
+  }
   if (!canAccessOwnedRecord(user, exam, 'edit')) {
     res.status(403).json({ error: 'غير مصرح لك باعتماد هذا الاختبار' });
     return;
@@ -1225,7 +1229,10 @@ router.post('/exams/:id/export-log', (req: AuthenticatedRequest, res: Response):
     res.status(404).json({ error: 'الاختبار غير موجود' });
     return;
   }
-  if (!canAccessOwnedRecord(user, exam, 'view')) {
+  if (
+    !canAccessAcademicScope(user, exam.grade, exam.subjectId || 'subj-en') ||
+    !canAccessOwnedRecord(user, exam, 'view')
+  ) {
     res.status(403).json({ error: 'غير مصرح لك بتصدير هذا الاختبار' });
     return;
   }
@@ -1261,7 +1268,11 @@ router.post('/exams/:id/export-pdf', async (req: AuthenticatedRequest, res: Resp
     res.status(404).json({ error: 'الاختبار غير موجود' });
     return;
   }
-  if (!isPracticeSandbox && !canAccessOwnedRecord(user, exam as any, 'view')) {
+  if (
+    !isPracticeSandbox &&
+    (!canAccessAcademicScope(user, (exam as any).grade, exam.subjectId || 'subj-en') ||
+      !canAccessOwnedRecord(user, exam as any, 'view'))
+  ) {
     recordSecurityEvent({
       req,
       actor: user,
@@ -1436,6 +1447,10 @@ router.post('/exams/:id/share', (req: AuthenticatedRequest, res: Response): void
   const exam = db.getExamById(req.params.id);
   if (!exam) {
     res.status(404).json({ error: 'الاختبار غير موجود' });
+    return;
+  }
+  if (!canAccessAcademicScope(actor, exam.grade, exam.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
     return;
   }
   if ((exam.ownerId || exam.createdBy) !== actor.id) {
