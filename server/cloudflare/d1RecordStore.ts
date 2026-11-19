@@ -22,6 +22,8 @@ export interface D1PreparedStatement {
 
 export interface D1Database {
   prepare(query: string): D1PreparedStatement;
+  /** D1 batch is transactional; optional in lightweight unit-test adapters. */
+  batch?<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
 }
 
 const COLLECTION_TABLES = {
