@@ -242,6 +242,17 @@ router.post('/auth/login', (req, res: Response): void => {
     return;
   }
 
+  const unknownIpKey = `unknown:${meta.ipAddress}`;
+  const unknownIpLock = isLoginWindowLocked(unknownIpKey);
+  if (unknownIpLock.locked) {
+    res.status(429).json({
+      error: `تم إيقاف محاولات الدخول مؤقتاً من هذا الاتصال. أعد المحاولة بعد ${unknownIpLock.retryAfterSec} ثانية.`,
+      code: 'RATE_LIMITED',
+      retryAfterSec: unknownIpLock.retryAfterSec,
+    });
+    return;
+  }
+
   const user = db.findUserByUsername(cleanUsername);
   if (!user) {
     // Check if username belongs to a pending/rejected registration request
@@ -273,7 +284,7 @@ router.post('/auth/login', (req, res: Response): void => {
       return;
     }
 
-    const unknownTracker = trackLoginFailureWindow(`unknown:${meta.ipAddress}`, 10 * 60 * 1000, 5, 10 * 60 * 1000);
+    const unknownTracker = trackLoginFailureWindow(unknownIpKey, 10 * 60 * 1000, 5, 10 * 60 * 1000);
     recordSecurityEvent({
       req,
       actorId: 'anonymous',
@@ -375,6 +386,7 @@ router.post('/auth/login', (req, res: Response): void => {
 
   // Successful login
   clearLoginFailureWindow(lockKey);
+  clearLoginFailureWindow(unknownIpKey);
   db.recordUserLoginSuccess(user.id);
   const { passwordHash: _, ...safeUser } = db.findUserByUsername(cleanUsername)!;
   const token = signAuthToken(safeUser);
