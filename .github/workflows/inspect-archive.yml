@@ -32,7 +32,7 @@ jobs:
               ("Private key", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
               ("Google API key", re.compile(rb"AIza[0-9A-Za-z_-]{30,}")),
               ("GitHub token", re.compile(rb"gh[pousr]_[A-Za-z0-9_]{20,}")),
-              ("Generic secret assignment", re.compile(rb"(?i)(api[_-]?key|secret|password|token)\\s*[:=]\\s*['\\"][^'\\"]{8,}")),
+              ("Possible secret assignment", re.compile(rb"(?i)(api[_-]?key|secret|password|token).{0,24}[:=].{0,24}")),
           ]
           findings = []
           lines = []
@@ -49,7 +49,7 @@ jobs:
               for info in infos:
                   name = info.filename
                   p = PurePosixPath(name)
-                  unsafe = name.startswith("/") or ".." in p.parts or "\\\\" in name
+                  unsafe = name.startswith("/") or ".." in p.parts or chr(92) in name
                   if unsafe:
                       findings.append((name, "Unsafe archive path (path traversal risk)"))
                       continue
@@ -64,7 +64,7 @@ jobs:
                       for label, pattern in secret_patterns:
                           if pattern.search(data):
                               findings.append((name, label))
-                  if ("database" in low or "/backups/" in low or low.startswith("data/")):
+                  if "database" in low or "/backups/" in low or low.startswith("data/"):
                       findings.append((name, "Data/database/backup file: exclude from source upload pending privacy review"))
                   if info.file_size > MAX_FILE:
                       findings.append((name, "Large file: not content-scanned"))
@@ -73,9 +73,9 @@ jobs:
               summary += [f"- {path}: {reason}" for path, reason in findings]
           else:
               summary.append("- No filename/content flags found by the basic scan.")
-          summary += ["", "Note: this is a conservative pattern scan, not a guarantee that secrets are absent. No archive files were extracted into the repository and no project code was executed."]
-          text = "\\n".join(summary)
-          print(text)
+          summary += ["", "Note: conservative pattern scan only; it cannot guarantee that secrets are absent. Nothing was extracted into the repository and no project code was executed."]
+          report = chr(10).join(summary)
+          print(report)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
-              f.write(text + "\\n")
+              f.write(report + chr(10))
           PY
