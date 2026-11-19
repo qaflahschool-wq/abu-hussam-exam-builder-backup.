@@ -6,6 +6,12 @@ The D1 staging schema is in [0001_initial_d1_schema.sql](./0001_initial_d1_schem
 
 Cloudflare D1 is accessed asynchronously through Worker bindings. Replacing the current database object with an asynchronous implementation without changing its callers would break request behavior. The existing Express entry point also depends on Node APIs and cannot be deployed unchanged as a Worker.
 
+## Staging application status
+
+Migration `0001_initial_d1_schema` was applied successfully to the isolated D1 database `abu-hussam-exam-builder-staging` (UUID `204dbdf9-5ae5-4ea3-a701-176e31bafe06`). A live schema query confirmed 15 application tables (plus Cloudflare's internal `_cf_KV` table). Verification queries confirmed zero rows in users, questions, exams, and registration requests. No application data was imported.
+
+The migration registry is populated with version `0001_initial_d1_schema`. This confirms schema setup only; it does not mean the app is connected to D1.
+
 ## Adapter added
 
 `server/cloudflare/d1RecordStore.ts` is a small, allowlisted D1 adapter for collection records stored as `id` + `record_json`. It uses parameter binding for values and does not accept arbitrary SQL table names. It is intentionally not imported by `server/db.ts` or `server/routes.ts` yet.
