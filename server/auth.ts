@@ -14,11 +14,15 @@ function getSessionSecret(): string {
     return process.env.SESSION_SECRET;
   }
   if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   }
+  try { fs.chmodSync(DATA_DIR, 0o700); } catch { /* ignore unsupported permission changes */ }
   if (fs.existsSync(SECRET_FILE)) {
     const existing = fs.readFileSync(SECRET_FILE, 'utf-8').trim();
-    if (existing.length >= 32) return existing;
+    if (existing.length >= 32) {
+      try { fs.chmodSync(SECRET_FILE, 0o600); } catch { /* ignore unsupported permission changes */ }
+      return existing;
+    }
   }
   const generated = crypto.randomBytes(48).toString('hex');
   fs.writeFileSync(SECRET_FILE, generated, { encoding: 'utf-8', mode: 0o600 });
