@@ -2,11 +2,13 @@ import { D1AuthVersionReader } from './server/cloudflare/d1AuthVersionReader.js'
 import { D1UserRepository } from './server/cloudflare/d1UserRepository.js';
 import { WorkerAuthService } from './server/cloudflare/workerAuthService.js';
 import { authenticateWorkerRequest } from './server/cloudflare/workerAuthGuard.js';
+import { QuestionImageStorage, type R2Bucket } from './server/cloudflare/questionImageStorage.js';
 
 interface Env {
   DB: D1Database;
   SESSION_SECRET: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
+  QUESTION_IMAGES?: R2Bucket;
 }
 
 interface D1Result<T = unknown> {
@@ -66,6 +68,65 @@ export default {
 
     if (url.pathname === '/api/worker/health' && request.method === 'GET') {
       return json({ status: 'ok', runtime: 'cloudflare-workers', timestamp: new Date().toISOString() });
+    }
+
+    if (url.pathname.startsWith('/api/worker/question-images')) {
+      if (serviceUnavailable(env) || !env.QUESTION_IMAGES) {
+        return json({ error: 'Image storage unavailable' }, 503);
+      }
+      try {
+        const users = new D1UserRepository(env.DB);
+        const versions = new D1AuthVersionReader(env.DB);
+        const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
+        if (!auth.ok) return json({ error: auth.error }, auth.status);
+        const storage = new QuestionImageStorage(env.QUESTION_IMAGES, env.DB);
+
+        if (url.pathname === '/api/worker/question-images' && request.method === 'POST') {
+          const length = Number(request.headers.get('Content-Length') || 0);
+          if (length > 4_100_000) return json({ error: 'Image payload is too large' }, 413);
+          const body: unknown = await request.json().catch(() => null);
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return json({ error: 'Invalid image payload' }, 400);
+          }
+          const input = body as Record<string, unknown>;
+          const questionId = typeof input.questionId === 'string' ? input.questionId : '';
+          const dataUrl = typeof input.imageDataUrl === 'string' ? input.imageDataUrl : '';
+          const match = dataUrl.match(/^data:(image\\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+          if (!match || match[2].length > 3_916_020) return json({ error: 'Unsupported or oversized image' }, 400);
+          const binary = atob(match[2]);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          const metadata = await storage.upload({
+            ownerId: auth.user.id,
+            questionId,
+            contentType: match[1],
+            bytes,
+          });
+          return json({ success: true, image: { id: metadata.id, questionId: metadata.questionId, contentType: metadata.contentType, byteSize: metadata.byteSize } }, 201);
+        }
+
+        const imageMatch = url.pathname.match(/^\\/api\\/worker\\/question-images\\/([A-Za-z0-9_-]{1,128})$/);
+        if (imageMatch && request.method === 'GET') {
+          const image = await storage.getForOwner(imageMatch[1], auth.user.id);
+          if (!image) return json({ error: 'Image not found' }, 404);
+          return new Response(image.bytes, {
+            headers: {
+              'Content-Type': image.contentType,
+              'Content-Length': String(image.byteSize),
+              'Cache-Control': 'private, no-store',
+              'X-Content-Type-Options': 'nosniff',
+            },
+          });
+        }
+        if (imageMatch && request.method === 'DELETE') {
+          const deleted = await storage.deleteForOwner(imageMatch[1], auth.user.id);
+          return deleted ? json({ success: true }) : json({ error: 'Image not found' }, 404);
+        }
+        return json({ error: 'Not found' }, 404);
+      } catch (error) {
+        console.error('Worker question image request failed', error);
+        return json({ error: 'Image request failed' }, 400);
+      }
     }
 
     if (url.pathname.startsWith('/api/worker/auth/') || url.pathname.startsWith('/api/worker/owner/')) {
