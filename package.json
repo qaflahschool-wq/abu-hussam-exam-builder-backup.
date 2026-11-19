@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "worker:dry-run": "npx --yes wrangler@4.165.0 deploy --dry-run --config wrangler.jsonc",
+    "worker:dev": "npx --yes wrangler@4.165.0 dev --local --config wrangler.jsonc"
   },
   "dependencies": {
     "@google/genai": "^3.2.0",
