@@ -1,0 +1,20 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Runtime data, credentials, and local environment
+data/
+.env
+.env.*
+!.env.example
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Archives and local artifacts
+*.zip
+*.log
+.DS_Store
