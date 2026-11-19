@@ -54,3 +54,29 @@ This inventory was generated from the current staging branch source, not inferre
 - `D1RecordStore` and `QuestionImageStorage` are isolated adapters only. They are not imported by the running app.
 - The R2 bucket exists but no Worker binding or application upload endpoint has been configured.
 - No JSON source data has been imported.
+
+
+## D1 adapter schema correction (2026-11-20)
+
+A source review found that the original generic `put()` wrote only `id` and `record_json`. That is insufficient for tables whose migration schema requires or indexes denormalized columns. In particular, `app_users` requires `username`, `role`, `status`, and `created_at`; `registration_requests` requires `username`, `status`, and `created_at`. It also left owner/scope indexes stale for questions and exams.
+
+The adapter now uses a static per-collection column projection when upserting:
+- Validates required user and registration fields before issuing SQL.
+- Populates required indexed identity/status/date columns.
+- Keeps owner, subject, grade, unit, status, and timestamp columns synchronized for questions, exams, archive, and other indexed collections.
+- Keeps all table/column identifiers on fixed allowlists and binds every value, including the JSON document.
+- Preserves the complete domain object in `record_json`.
+
+New unit coverage includes required-column checks, owner/scope projection, registration requests, and early rejection of incomplete user records.
+
+A live, temporary probe was also executed against the isolated staging D1 database using the same upsert column sets for `app_users` and `registration_requests`. Both inserts and read-backs succeeded, and both probe rows were deleted in the same batch. This verifies those SQL projections against the deployed staging schema; it is not a substitute for running the repository's full CI suite.
+
+## Remaining release blockers
+
+- The updated adapter is still not connected to `server/db.ts` or the Express routes.
+- The application still has synchronous filesystem persistence and Node/Express runtime dependencies.
+- Multi-record operations (registration approval, auth-version changes, archive/restore, audit hash-chain append) still need explicit transactional D1 implementations.
+- No staging Worker or application API deployment has been created.
+- R2 image storage remains an isolated service; authenticated upload/read/replace/delete endpoints and editor integration are not complete.
+- PDF generation still depends on local Chromium and has not been ported or validated through Browser Rendering.
+- No production data has been imported and no production resource has been changed.
