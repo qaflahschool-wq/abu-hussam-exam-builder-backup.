@@ -10,8 +10,15 @@ const DATA_DIR = path.resolve(process.cwd(), 'data');
 const SECRET_FILE = path.join(DATA_DIR, 'session.secret');
 
 function getSessionSecret(): string {
-  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 16) {
+  if (process.env.SESSION_SECRET) {
+    const minimumLength = process.env.NODE_ENV === 'production' ? 32 : 16;
+    if (process.env.SESSION_SECRET.length < minimumLength) {
+      throw new Error(`SESSION_SECRET must be at least ${minimumLength} characters.`);
+    }
     return process.env.SESSION_SECRET;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET must be explicitly configured in production; refusing to generate a session key on an ephemeral or misconfigured server.');
   }
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -52,7 +59,7 @@ export function signAuthToken(user: User, ttlHours = 24 * 7): string {
 }
 
 export function verifyAuthToken(token: string): TokenPayload | null {
-  if (!token || typeof token !== 'string' || !token.includes('.')) {
+  if (!token || typeof token !== 'string' || token.length > 4096 || !token.includes('.')) {
     return null;
   }
   const parts = token.split('.');
@@ -67,7 +74,19 @@ export function verifyAuthToken(token: string): TokenPayload | null {
       return null;
     }
     const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf-8')) as TokenPayload;
-    if (!payload.userId || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      typeof payload.userId !== 'string' ||
+      payload.userId.length < 1 ||
+      payload.userId.length > 128 ||
+      !Number.isSafeInteger(payload.iat) ||
+      !Number.isSafeInteger(payload.exp) ||
+      payload.iat <= 0 ||
+      payload.iat > now + 60 ||
+      payload.exp <= now ||
+      payload.exp <= payload.iat ||
+      payload.exp - payload.iat > 30 * 24 * 60 * 60
+    ) {
       return null;
     }
     return payload;
