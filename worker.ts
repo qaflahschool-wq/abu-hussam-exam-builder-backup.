@@ -92,10 +92,10 @@ export default {
         const html = input.htmlDocument
           .replace(/<\/?(?:script|iframe|object|embed|base|form)\b[^>]*>/gi, '')
           .replace(/<link\b[^>]*>/gi, '')
-          .replace(/\\s+on[a-z]+\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)/gi, '')
+          .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
           .replace(/@import\s+[^;]+;?/gi, '')
           .replace(/url\(\s*(['"]?)(?:https?:|javascript:|file:|data:text\/html)[^)]*\)/gi, 'none')
-          .replace(/\\s+(?:src|href)\\s*=\\s*(['"])https?:[^'"]*\\1/gi, '');
+          .replace(/\s+(?:src|href)\s*=\s*(['"])https?:[^'"]*\1/gi, '');
         const rate = await env.DB.prepare(
           "INSERT INTO auth_rate_limits (bucket_key, window_started_at, attempts, locked_until) VALUES (?, ?, 1, NULL) " +
           "ON CONFLICT(bucket_key) DO UPDATE SET attempts = CASE WHEN window_started_at + 60000 <= ? THEN 1 ELSE attempts + 1 END, " +
