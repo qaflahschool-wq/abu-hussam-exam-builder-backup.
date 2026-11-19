@@ -86,8 +86,8 @@ export const LoginView: React.FC = () => {
       setRegError('اسم الدخول يجب أن يكون بالإنجليزية والأرقام فقط (3 إلى 32 حرفاً)');
       return;
     }
-    if (regPassword.length < 6) {
-      setRegError('كلمة المرور يجب أن لا تقل عن 6 أحرف');
+    if (regPassword.length < 8) {
+      setRegError('كلمة المرور يجب ألا تقل عن 8 أحرف');
       return;
     }
     if (regPassword !== regConfirmPassword) {
@@ -135,18 +135,6 @@ export const LoginView: React.FC = () => {
 
   const toggleItem = (list: string[], id: string, setter: (val: string[]) => void) => {
     setter(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
-  };
-
-  const quickLogin = async (u: string, p: string) => {
-    setError('');
-    try {
-      setSubmitting(true);
-      await login(u, p);
-    } catch (err: any) {
-      setError(err.message || 'تعذر تسجيل الدخول');
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   return (
@@ -281,63 +269,6 @@ export const LoginView: React.FC = () => {
                 </button>
               </form>
 
-              {/* Direct Role Entry Cards for Qaflah School Evaluation */}
-              <div className="pt-4 border-t border-slate-200 space-y-2.5">
-                <div className="text-xs font-bold text-slate-600">دخول سريع حسب الصلاحية (حسابات المدرسة المعتمدة):</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => quickLogin('admin', 'admin123')}
-                    className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100 text-right transition-colors flex items-center gap-2.5"
-                  >
-                    <Sparkles className="w-4 h-4 text-[#1B5E3A] shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-slate-900">أبوحسام (صاحب النظام)</div>
-                      <div className="text-[10px] text-slate-600 truncate">AI + مركز التحكم + الموافقات</div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => quickLogin('schooladmin', 'school123')}
-                    className="p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-right transition-colors flex items-center gap-2.5"
-                  >
-                    <Building2 className="w-4 h-4 text-slate-700 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-slate-900">إدارة المدرسة</div>
-                      <div className="text-[10px] text-slate-600 truncate">المواد + المعلمين + الترويسة</div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => quickLogin('teacher', 'teacher123')}
-                    className="p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-right transition-colors flex items-center gap-2.5"
-                  >
-                    <GraduationCap className="w-4 h-4 text-blue-700 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-slate-900">أ. محمد (معلم 1)</div>
-                      <div className="text-[10px] text-slate-600 truncate">مساحة خاصة · إعداد يدوي</div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => quickLogin('teacher2', 'teacher123')}
-                    className="p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-right transition-colors flex items-center gap-2.5"
-                  >
-                    <Shield className="w-4 h-4 text-teal-700 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-slate-900">أ. فاطمة (معلم 2)</div>
-                      <div className="text-[10px] text-slate-600 truncate">رياضيات وعلوم · مساحة خاصة</div>
-                    </div>
-                  </button>
-                </div>
-              </div>
             </>
           ) : (
             <div className="space-y-4">
