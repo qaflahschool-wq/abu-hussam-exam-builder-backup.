@@ -1,19 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-
-const API_BASE = 'http://localhost:3000/api';
+import { authenticatedRequest } from './test-utils/authenticated-request.js';
 
 async function request(endpoint: string, options: any = {}) {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-user-id': 'usr-admin',
-      ...(options.headers || {}),
-    },
-  });
-  const data = await res.json();
-  return { status: res.status, ok: res.ok, data };
+  return authenticatedRequest(endpoint, options);
 }
 
 async function runFidelityVerification() {
