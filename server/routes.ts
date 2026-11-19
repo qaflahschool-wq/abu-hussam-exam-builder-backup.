@@ -1766,7 +1766,40 @@ router.get('/ai/settings', requireAIAccess, (_req: AuthenticatedRequest, res: Re
 });
 
 router.post('/ai/settings', requireAIAccess, (req: AuthenticatedRequest, res: Response): void => {
-  const updated = db.updateAISettings(req.body);
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const patch: any = {};
+
+  if (Object.prototype.hasOwnProperty.call(body, 'primaryModel')) {
+    if (typeof body.primaryModel !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(body.primaryModel)) {
+      res.status(400).json({ error: 'اسم النموذج الأساسي غير صالح' });
+      return;
+    }
+    patch.primaryModel = body.primaryModel;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'fallbackModel')) {
+    if (typeof body.fallbackModel !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(body.fallbackModel)) {
+      res.status(400).json({ error: 'اسم النموذج الاحتياطي غير صالح' });
+      return;
+    }
+    patch.fallbackModel = body.fallbackModel;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'allowPaidModels')) {
+    if (typeof body.allowPaidModels !== 'boolean') {
+      res.status(400).json({ error: 'قيمة السماح بالنماذج المدفوعة غير صالحة' });
+      return;
+    }
+    patch.allowPaidModels = body.allowPaidModels;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'temperature')) {
+    const temperature = Number(body.temperature);
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+      res.status(400).json({ error: 'درجة حرارة النموذج يجب أن تكون بين 0 و2' });
+      return;
+    }
+    patch.temperature = temperature;
+  }
+
+  const updated = db.updateAISettings(patch);
   res.json({ success: true, settings: updated });
 });
 
@@ -1775,9 +1808,18 @@ router.get('/ai/models', requireAIAccess, (_req: AuthenticatedRequest, res: Resp
 });
 
 router.post('/ai/ping', requireAIAccess, requireAIRateLimit, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const { model } = req.body;
-  const result = await geminiService.pingTest(model);
-  res.json(result);
+  const { model } = req.body || {};
+  const availableModels = geminiService.getAvailableModels();
+  if (model && !availableModels.some((item: any) => item.id === model || item.name === model)) {
+    res.status(400).json({ error: 'النموذج المحدد غير موجود ضمن النماذج المتاحة' });
+    return;
+  }
+  try {
+    const result = await geminiService.pingTest(model);
+    res.json(result);
+  } catch {
+    res.status(502).json({ error: 'تعذر الاتصال بخدمة الذكاء الاصطناعي حالياً' });
+  }
 });
 
 router.get('/ai/logs', requireAIAccess, (_req: AuthenticatedRequest, res: Response): void => {
