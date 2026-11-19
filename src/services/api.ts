@@ -157,6 +157,35 @@ class ApiService {
     });
   }
 
+
+  async uploadQuestionImage(questionId: string, imageDataUrl: string): Promise<{
+    success: boolean;
+    image: { id: string; questionId: string; contentType: string; byteSize: number };
+  }> {
+    return this.request('/api/worker/question-images', {
+      method: 'POST',
+      body: JSON.stringify({ questionId, imageDataUrl }),
+    });
+  }
+
+  async getQuestionImageBlob(imageId: string): Promise<Blob> {
+    const token =
+      this.authToken ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('abuhussam_auth_token') || '' : '');
+    const response = await fetch(`/api/worker/question-images/${encodeURIComponent(imageId)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      cache: 'no-store',
+    });
+    if (!response.ok) throw new Error('تعذر تحميل صورة السؤال من التخزين الآمن');
+    return response.blob();
+  }
+
+  async deleteQuestionImage(imageId: string): Promise<{ success: boolean }> {
+    return this.request(`/api/worker/question-images/${encodeURIComponent(imageId)}`, {
+      method: 'DELETE',
+    });
+  }
+
   async login(username: string, password: string): Promise<{ success: boolean; token: string; user: User }> {
     return this.request('/api/worker/auth/login', {
       method: 'POST',
