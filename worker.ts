@@ -9,6 +9,7 @@ interface Env {
   SESSION_SECRET: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   QUESTION_IMAGES?: R2Bucket;
+  BROWSER?: { quickAction(action: 'pdf', options: Record<string, unknown>): Promise<Response> };
 }
 
 interface D1Result<T = unknown> {
@@ -68,6 +69,62 @@ export default {
 
     if (url.pathname === '/api/worker/health' && request.method === 'GET') {
       return json({ status: 'ok', runtime: 'cloudflare-workers', timestamp: new Date().toISOString() });
+    }
+
+
+    const pdfRoute = url.pathname.match(/^\\/api\\/worker\\/exams\\/([A-Za-z0-9_-]{1,128})\\/export-pdf$/);
+    if (pdfRoute && request.method === 'POST') {
+      if (serviceUnavailable(env) || !env.BROWSER) return json({ error: 'PDF rendering unavailable' }, 503);
+      try {
+        const users = new D1UserRepository(env.DB);
+        const versions = new D1AuthVersionReader(env.DB);
+        const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
+        if (!auth.ok) return json({ error: auth.error }, auth.status);
+        const contentLength = Number(request.headers.get('Content-Length') || 0);
+        if (contentLength > 10_000_000) return json({ error: 'PDF source is too large' }, 413);
+        const body: unknown = await request.json().catch(() => null);
+        if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Invalid PDF request' }, 400);
+        const input = body as Record<string, unknown>;
+        if (typeof input.htmlDocument !== 'string' || input.htmlDocument.length < 100 || input.htmlDocument.length > 9_500_000) {
+          return json({ error: 'Invalid PDF document' }, 400);
+        }
+        const mode = input.mode === 'TeacherAnswerKey' ? 'TeacherAnswerKey' : 'StudentPaper';
+        const html = input.htmlDocument
+          .replace(/<\\/?(?:script|iframe|object|embed|base|form)\\b[^>]*>/gi, '')
+          .replace(/<link\\b[^>]*>/gi, '')
+          .replace(/\\s+on[a-z]+\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)/gi, '')
+          .replace(/@import\\s+[^;]+;?/gi, '')
+          .replace(/url\\(\\s*(['"]?)(?:https?:|javascript:|file:|data:text/html)[^)]*\\)/gi, 'none')
+          .replace(/\\s+(?:src|href)\\s*=\\s*(['"])https?:[^'"]*\\1/gi, '');
+        const rate = await env.DB.prepare(
+          "INSERT INTO auth_rate_limits (bucket_key, window_started_at, attempts, locked_until) VALUES (?, ?, 1, NULL) " +
+          "ON CONFLICT(bucket_key) DO UPDATE SET attempts = CASE WHEN window_started_at + 60000 <= ? THEN 1 ELSE attempts + 1 END, " +
+          "window_started_at = CASE WHEN window_started_at + 60000 <= ? THEN ? ELSE window_started_at END RETURNING attempts"
+        ).bind(`pdf:${auth.user.id}`, Date.now(), Date.now(), Date.now(), Date.now()).first<{ attempts: number }>();
+        if (!rate || Number(rate.attempts) > 8) return json({ error: 'PDF export rate limit exceeded' }, 429);
+
+        const pdf = await env.BROWSER.quickAction('pdf', {
+          html,
+          pdfOptions: { printBackground: true, preferCSSPageSize: true },
+          rejectRequestPattern: ['.*'],
+        });
+        if (!pdf.ok) return json({ error: 'PDF rendering failed' }, 502);
+        const filename = typeof input.filename === 'string' && /^[A-Za-z0-9._-]{1,100}\\.pdf$/i.test(input.filename)
+          ? input.filename
+          : `exam-${mode === 'TeacherAnswerKey' ? 'answer-key' : 'student'}.pdf`;
+        return new Response(pdf.body, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Cache-Control': 'private, no-store',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      } catch (error) {
+        console.error('Worker PDF export failed', error);
+        return json({ error: 'PDF export failed' }, 500);
+      }
     }
 
     if (url.pathname.startsWith('/api/worker/question-images')) {
