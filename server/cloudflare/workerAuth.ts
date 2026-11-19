@@ -118,7 +118,7 @@ export async function verifyWorkerAuthToken(
     const validSignature = await crypto.subtle.verify(
       'HMAC',
       key,
-      signature,
+      signature.slice().buffer as ArrayBuffer,
       encoder.encode(parts[0])
     );
     if (!validSignature) return null;
