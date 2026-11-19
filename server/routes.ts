@@ -1604,8 +1604,25 @@ router.post('/exams/validate', (req: AuthenticatedRequest, res: Response): void 
 
 router.post('/vision/analyze', requireAIAccess, requireAIRateLimit, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { images, gradeHint, unitHint } = req.body;
-  if (!images || !Array.isArray(images) || images.length === 0) {
+  if (!Array.isArray(images) || images.length === 0) {
     res.status(400).json({ error: 'يرجى تقديم صورة واحدة على الأقل للتحليل' });
+    return;
+  }
+  if (images.length > 8) {
+    res.status(413).json({ error: 'الحد الأقصى المسموح به هو 8 صور في الطلب الواحد' });
+    return;
+  }
+  let totalImagePayload = 0;
+  const validImages = images.every((image: any) => {
+    if (!image || typeof image.dataUrl !== 'string') return false;
+    totalImagePayload += image.dataUrl.length;
+    return (
+      /^data:image\/(?:png|jpeg|webp);base64,/i.test(image.dataUrl) &&
+      image.dataUrl.length <= 5_500_000
+    );
+  });
+  if (!validImages || totalImagePayload > 9_500_000) {
+    res.status(400).json({ error: 'بيانات الصور غير صالحة أو يتجاوز حجمها الحد المسموح به' });
     return;
   }
   try {
