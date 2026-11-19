@@ -1998,6 +1998,24 @@ var Database = class {
 };
 var db = new Database();
 
+// server/examImageValidation.ts
+function hasValidExamImagePayload(exam) {
+  if (!Array.isArray(exam?.sections)) return true;
+  let totalBytes = 0;
+  for (const section of exam.sections) {
+    if (!Array.isArray(section?.questions)) continue;
+    for (const question of section.questions) {
+      const image = question?.imageDataUrl;
+      if (image === void 0 || image === null || image === "") continue;
+      if (typeof image !== "string" || !/^data:image\/(?:png|jpeg|webp);base64,/i.test(image)) return false;
+      if (image.length > 4e6) return false;
+      totalBytes += image.length;
+      if (totalBytes > 85e5) return false;
+    }
+  }
+  return true;
+}
+
 // server/gemini.ts
 import { GoogleGenAI } from "@google/genai";
 function withTimeout(promise, ms, msg) {
@@ -4406,22 +4424,6 @@ function canAccessOwnedRecord(user, record, mode) {
 
 // server/routes.ts
 var router = express.Router();
-function hasValidExamImagePayload(exam) {
-  if (!Array.isArray(exam?.sections)) return true;
-  let totalBytes = 0;
-  for (const section of exam.sections) {
-    if (!Array.isArray(section?.questions)) continue;
-    for (const question of section.questions) {
-      const image = question?.imageDataUrl;
-      if (image === void 0 || image === null || image === "") continue;
-      if (typeof image !== "string" || !/^data:image\/(?:png|jpeg|webp);base64,/i.test(image)) return false;
-      if (image.length > 4e6) return false;
-      totalBytes += image.length;
-      if (totalBytes > 85e5) return false;
-    }
-  }
-  return true;
-}
 function requireAIRateLimit(req, res, next) {
   const userId = req.authUser?.id || "anonymous";
   const limit = checkSlidingRateLimit(`ai-request:${userId}`, 15, 60 * 1e3);
