@@ -116,6 +116,8 @@ jobs:
 
       - name: Commit extracted files to review branch
         shell: bash
+        env:
+          TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -124,5 +126,5 @@ jobs:
             echo "No extracted source changes to commit."
           else
             git commit -m "Extract reviewed project source from ZIP"
-            git push origin HEAD:"${{ inputs.target_branch }}"
+            git push origin "HEAD:$TARGET_BRANCH"
           fi
