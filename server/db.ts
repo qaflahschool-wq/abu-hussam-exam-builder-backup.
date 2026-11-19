@@ -1132,9 +1132,10 @@ class Database {
 
         return parsed;
       } catch (err) {
-        console.error('Error reading database file:', err);
+        console.error('Database load or migration failed:', err);
         if (process.env.NODE_ENV === 'production') {
-          throw new Error('Database file is unreadable. Refusing to replace existing data with a fresh seed database.');
+          const reason = err instanceof Error ? err.message : 'unknown database error';
+          throw new Error(`Production database load failed: ${reason}. Refusing to replace existing data with a fresh seed database.`);
         }
       }
     }
