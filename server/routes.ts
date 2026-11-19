@@ -13,6 +13,7 @@ import {
   isPlatformOwner,
   userHasAIAccess,
   canAccessOwnedRecord,
+  canAccessAcademicScope,
 } from './auth.js';
 import {
   getClientMeta,
@@ -730,7 +731,9 @@ router.get('/questions', (req: AuthenticatedRequest, res: Response): void => {
     sourceCode: sourceCode as any,
     educationalLevel: educationalLevel as any,
     grammarCategory,
-  });
+  }).filter((question) =>
+    canAccessAcademicScope(user, question.grade, question.subjectId || 'subj-en')
+  );
   res.json(list);
 });
 
@@ -739,6 +742,10 @@ router.post('/questions', (req: AuthenticatedRequest, res: Response): void => {
   const q = req.body;
   if (!q.questionText || !q.modelAnswer || !q.grade) {
     res.status(400).json({ error: 'يرجى تقديم نص السؤال والصف والإجابة النموذجية' });
+    return;
+  }
+  if (!canAccessAcademicScope(user, q.grade, q.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
     return;
   }
   const isQuranQuestion =
@@ -778,6 +785,10 @@ router.put('/questions/:id', (req: AuthenticatedRequest, res: Response): void =>
     res.status(404).json({ error: 'السؤال غير موجود' });
     return;
   }
+  if (!canAccessAcademicScope(user, existing.grade, existing.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
+    return;
+  }
   if (!canAccessOwnedRecord(user, existing, 'edit')) {
     recordSecurityEvent({
       req,
@@ -795,6 +806,14 @@ router.put('/questions/:id', (req: AuthenticatedRequest, res: Response): void =>
     return;
   }
   const { ownerId: _ignoredOwner, id: _ignoredId, ...safePatch } = req.body;
+  if (!canAccessAcademicScope(
+    user,
+    safePatch.grade || existing.grade,
+    safePatch.subjectId || existing.subjectId || 'subj-en'
+  )) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
+    return;
+  }
   const updated = db.updateQuestion(req.params.id, safePatch);
   res.json({ success: true, question: updated });
 });
@@ -868,7 +887,10 @@ router.post('/questions/generate', requireAIAccess, async (req: AuthenticatedReq
 // ==================== EXAMS (PRIVATE TEACHER WORKSPACES & OPT-IN SHARING) ====================
 
 router.get('/exams', (req: AuthenticatedRequest, res: Response): void => {
-  res.json(db.getExams(req.authUser!.id));
+  const user = req.authUser!;
+  res.json(db.getExams(user.id).filter((exam) =>
+    canAccessAcademicScope(user, exam.grade, exam.subjectId || 'subj-en')
+  ));
 });
 
 router.get('/exams/:id', (req: AuthenticatedRequest, res: Response): void => {
@@ -876,6 +898,10 @@ router.get('/exams/:id', (req: AuthenticatedRequest, res: Response): void => {
   const exam = db.getExamById(req.params.id);
   if (!exam) {
     res.status(404).json({ error: 'الاختبار غير موجود' });
+    return;
+  }
+  if (!canAccessAcademicScope(user, exam.grade, exam.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
     return;
   }
   if (!canAccessOwnedRecord(user, exam, 'view')) {
@@ -905,6 +931,15 @@ router.post('/exams', (req: AuthenticatedRequest, res: Response): void => {
   const exam = req.body;
   if (!exam.title || !exam.grade || !exam.sections) {
     res.status(400).json({ error: 'بيانات الاختبار غير مكتملة' });
+    return;
+  }
+  const existingForScope = exam.id ? db.getExamById(exam.id) : undefined;
+  if (!canAccessAcademicScope(
+    user,
+    exam.grade || existingForScope?.grade,
+    exam.subjectId || existingForScope?.subjectId || 'subj-en'
+  )) {
+    res.status(403).json({ error: 'لا تملك صلاحية إنشاء أو تعديل اختبار لهذا الصف أو المادة' });
     return;
   }
 
@@ -1043,6 +1078,10 @@ router.delete('/exams/:id', (req: AuthenticatedRequest, res: Response): void => 
     res.status(403).json({ error: 'فقط مالك الاختبار يمكنه أرشفته أو حذفه' });
     return;
   }
+  if (!canAccessAcademicScope(user, existing.grade, existing.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
+    return;
+  }
   const ok = db.deleteExam(req.params.id);
   if (ok) {
     recordSecurityEvent({
@@ -1064,6 +1103,10 @@ router.post('/exams/:id/clone', (req: AuthenticatedRequest, res: Response): void
   const original = db.getExamById(req.params.id);
   if (!original) {
     res.status(404).json({ error: 'الاختبار غير موجود' });
+    return;
+  }
+  if (!canAccessAcademicScope(user, original.grade, original.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
     return;
   }
   if (!canAccessOwnedRecord(user, original, 'view')) {
