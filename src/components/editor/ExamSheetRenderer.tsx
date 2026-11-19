@@ -582,7 +582,7 @@ export const QuestionCardBlockView: React.FC<QuestionBlockRenderProps> = ({
                   <span>صورة</span>
                   <input
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    accept="image/png,image/jpeg,image/webp"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
