@@ -286,3 +286,12 @@ test('Worker owner approval creates an active user through a D1 batch', async ()
   assert.equal('passwordHash' in body.user, false);
   assert.equal(body.request.status, 'APPROVED');
 });
+
+test('Worker delegates non-API requests to the static asset binding', async () => {
+  const response = await worker.fetch(
+    new Request('https://worker.test/'),
+    { ASSETS: { fetch: async (request: Request) => new Response(`asset:${new URL(request.url).pathname}`) } } as never,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), 'asset:/');
+});
