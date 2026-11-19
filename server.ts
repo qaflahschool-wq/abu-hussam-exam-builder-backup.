@@ -16,7 +16,40 @@ async function startServer() {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
-  app.use(cors());
+  // Trust forwarded client IPs only when the deployment explicitly declares
+  // the exact number of trusted proxy hops. Never trust X-Forwarded-For by default.
+  const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || '0', 10);
+  if (Number.isInteger(trustProxyHops) && trustProxyHops > 0 && trustProxyHops <= 5) {
+    app.set('trust proxy', trustProxyHops);
+  }
+
+  // Restrict cross-origin browser access to explicitly configured origins.
+  // Same-origin and non-browser requests without an Origin header continue to work.
+  const allowedOrigins = new Set(
+    (process.env.CORS_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+  );
+  if (!isProd) {
+    allowedOrigins.add('http://localhost:3000');
+    allowedOrigins.add('http://localhost:5173');
+    allowedOrigins.add('http://127.0.0.1:3000');
+    allowedOrigins.add('http://127.0.0.1:5173');
+  }
+
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Accept'],
+    maxAge: 600,
+  }));
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
