@@ -4509,8 +4509,8 @@ router.post("/auth/register", (req, res) => {
     });
     return;
   }
-  if (!password || String(password).length < 6) {
-    res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u064A\u062C\u0628 \u0623\u0646 \u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 6 \u0623\u062D\u0631\u0641" });
+  if (!password || String(password).length < 8) {
+    res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u064A\u062C\u0628 \u0623\u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641" });
     return;
   }
   if (password !== confirmPassword) {
@@ -4754,8 +4754,8 @@ router.post("/auth/switch-user", requirePlatformOwner, (req, res) => {
 router.post("/auth/reset-password", (req, res) => {
   const actor = req.authUser;
   const { userId, newPassword } = req.body;
-  if (!userId || !newPassword || String(newPassword).length < 4) {
-    res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u064A\u062C\u0628 \u0623\u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 4 \u0623\u062D\u0631\u0641" });
+  if (!userId || !newPassword || String(newPassword).length < 8) {
+    res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u064A\u062C\u0628 \u0623\u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641" });
     return;
   }
   const target = db.findUserById(userId);
@@ -6263,6 +6263,10 @@ router.post("/system/users", requireSchoolAdminOrOwner, (req, res) => {
   const { username, name, role, email, phone, password, assignedSubjects, assignedGrades, hasAIAccess } = req.body;
   if (!username || !password || !name) {
     res.status(400).json({ error: "\u064A\u0631\u062C\u0649 \u0625\u0643\u0645\u0627\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645" });
+    return;
+  }
+  if (typeof password !== "string" || password.length < 8) {
+    res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0633\u0627\u0628 \u064A\u062C\u0628 \u0623\u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641" });
     return;
   }
   if (role === "PlatformOwner" || role === "Administrator") {
