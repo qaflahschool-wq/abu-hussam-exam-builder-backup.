@@ -452,7 +452,7 @@ class ApiService {
     const token =
       this.authToken ||
       (typeof localStorage !== 'undefined' ? localStorage.getItem('abuhussam_auth_token') || '' : '');
-    const endpoint = `/api/exams/${examId}/export-pdf`;
+    const endpoint = `/api/worker/exams/${encodeURIComponent(examId)}/export-pdf`;
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
