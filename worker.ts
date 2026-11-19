@@ -111,7 +111,7 @@ export default {
             return json({ requests: await authService.listRegistrationRequests(status) });
           }
 
-          const match = url.pathname.match(/^\\/api\\/worker\\/owner\\/registration-requests\\/([^/]+)\\/(approve|reject|needs-edit)$/);
+          const match = url.pathname.match(/^\/api\/worker\/owner\/registration-requests\/([^/]+)\/(approve|reject|needs-edit)$/);
           if (match && request.method === 'POST') {
             const requestId = decodeURIComponent(match[1]);
             const body: unknown = await request.json().catch(() => ({}));
