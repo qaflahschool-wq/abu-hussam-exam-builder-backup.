@@ -174,3 +174,17 @@ Added a minimal API-only module Worker at `worker.ts` plus isolated `wrangler.js
 - Configuration targets only the already-created isolated staging D1 database, disables `workers.dev`, and defines no production route or R2 binding.
 
 This is a deliberately narrow Worker foundation, not a complete app deployment. Login and registration are not implemented in Worker yet; neither are the 78 Express API routes, Vite static assets, R2 upload endpoints, PDF rendering, or data migration. Wrangler is not yet pinned in package dependencies, and the Worker-runtime tests have not been run in Miniflare/Cloudflare. Do not deploy or route production traffic to this entrypoint.
+
+## Worker registration and login endpoints (2026-11-20)
+
+Added a first executable authentication slice on the staging branch:
+
+- `POST /api/worker/auth/register` validates name, username, password confirmation, role, subject IDs, and grade assignments. It uses `bcryptjs` asynchronous hashing, writes only a pending registration request, and removes the password hash from the response.
+- `POST /api/worker/auth/login` verifies the same bcryptjs hash format used by the existing Express application, enforces account status and persistent account lockout, updates successful/failed login state, and issues a Web Crypto HMAC session.
+- `GET /api/worker/auth/me` continues to validate token signature, expiry, authVersion, current user status, and role.
+- Migration 0003 adds a unique index for pending registration usernames, a durable IP rate-limit table, and the canonical eight subject records required for teacher assignment validation.
+- Worker tests now include a pending registration response and a successful login using a bcryptjs hash.
+
+**Important scope boundary:** this is not yet the complete authentication lifecycle. Owner approval/rejection and atomic user creation, password reset/change, security audit and notification parity, and registration management routes remain unimplemented. The endpoints have been committed but not yet validated by a successful CI run or a staging Worker runtime smoke test. Migration 0003 has not been applied to staging D1. Do not use these endpoints until the migration is applied and tests pass.
+
+The existing Express login/register routes remain unchanged and continue to use the JSON-file database. The Worker endpoints are separate staging paths; no production traffic has been switched.
