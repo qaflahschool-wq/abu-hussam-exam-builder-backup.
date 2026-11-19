@@ -113,7 +113,7 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   const token = authHeader.slice('Bearer '.length).trim();
   const payload = verifyAuthToken(token);
   if (!payload) {
-    const ip = String(req.headers['x-forwarded-for'] || req.ip || 'unknown').split(',')[0].trim();
+    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     const badTracker = trackLoginFailureWindow(`bad-token:${ip}`, 10 * 60 * 1000, 3, 5 * 60 * 1000);
     recordSecurityEvent({
       req,
