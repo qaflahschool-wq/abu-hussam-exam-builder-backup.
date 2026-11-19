@@ -855,6 +855,10 @@ router.delete('/questions/:id', (req: AuthenticatedRequest, res: Response): void
     res.status(404).json({ error: 'السؤال غير موجود' });
     return;
   }
+  if (!canAccessAcademicScope(user, existing.grade, existing.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
+    return;
+  }
   if ((existing.ownerId || 'usr-admin') !== user.id) {
     recordSecurityEvent({
       req,
