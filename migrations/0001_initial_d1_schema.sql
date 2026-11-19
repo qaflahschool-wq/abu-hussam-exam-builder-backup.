@@ -143,3 +143,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_user_timestamp ON audit_logs(user_id, timestamp);
+
+-- Record this migration so staging can verify its schema version.
+INSERT OR IGNORE INTO app_migrations (version, applied_at, checksum)
+VALUES ('0001_initial_d1_schema', CURRENT_TIMESTAMP, 'schema-v1-initial');
