@@ -1,6 +1,6 @@
 # Cloudflare Worker staging entrypoint
 
-This is an API-only staging foundation. It is deliberately not wired to the production hostname and does not replace the existing Express application.
+This is a staging Worker foundation with a Vite static-asset binding and a growing API surface. It is deliberately not wired to the production hostname and does not replace the existing Express application.
 
 ## Current endpoints
 
@@ -26,7 +26,7 @@ Unknown paths return 404. The entrypoint does not accept identity headers and do
 
 ## Staging bindings
 
-`wrangler.jsonc` points only to the isolated D1 database `abu-hussam-exam-builder-staging`. It has `workers_dev: false`, no production route, no R2 binding, and no production resource identifiers.
+`wrangler.jsonc` points only to the isolated D1 database `abu-hussam-exam-builder-staging` and the Vite `dist` static asset directory. SPA fallback is enabled and `/api/*` is routed through the Worker first. It has `workers_dev: false`, no production route, no R2 binding, and no production resource identifiers.
 
 Configure the session signing secret as a Cloudflare Worker secret in the staging environment before using authenticated routes. Never commit the value to Git.
 
@@ -46,4 +46,4 @@ These checks have not yet been confirmed for the latest auth implementation. Do 
 
 ## Important limitations
 
-This Worker is not yet the complete exam application. It does not implement owner approval, question/exam CRUD, image routes, PDF generation, or serve the Vite frontend. The current Express server and its synchronous JSON-file database remain the active application. No data import or production cutover is performed by this foundation.
+This Worker is not yet the complete exam application. The static asset configuration can serve the Vite frontend after a build, but the frontend's API client has not been switched to the Worker yet. The Worker still does not implement the remaining question/exam CRUD, image routes, or PDF generation. The current Express server and its synchronous JSON-file database remain the active application. No data import or production cutover is performed by this foundation.
