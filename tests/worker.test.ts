@@ -183,3 +183,45 @@ test('Worker registration review listing is restricted to platform owners', asyn
   );
   assert.equal(denied.status, 403);
 });
+
+test('Worker registration refuses privileged self-assigned roles', async () => {
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/auth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'CF-Connecting-IP': '192.0.2.12' },
+      body: JSON.stringify({
+        fullName: 'Attempted Owner',
+        username: 'attempt.owner',
+        password: 'correct-horse-battery',
+        confirmPassword: 'correct-horse-battery',
+        requestedRole: 'PlatformOwner',
+      }),
+    }),
+    { DB: authDatabase() as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 403);
+});
+
+test('Worker login rejects a wrong bcrypt password without issuing a session', async () => {
+  const passwordHash = await bcrypt.hash('correct-horse-battery', 4);
+  const stored = {
+    id: 'u-wrong-pass',
+    username: 'teacher.wrong',
+    role: 'Teacher',
+    status: 'ACTIVE',
+    name: 'Teacher Wrong',
+    passwordHash,
+    authVersion: 0,
+  };
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'CF-Connecting-IP': '192.0.2.13' },
+      body: JSON.stringify({ username: 'teacher.wrong', password: 'not-the-password' }),
+    }),
+    { DB: authDatabase(stored) as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 401);
+  const body = await response.json() as Record<string, unknown>;
+  assert.equal('token' in body, false);
+});
