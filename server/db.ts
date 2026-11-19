@@ -1302,6 +1302,17 @@ class Database {
     return rest;
   }
 
+  public getAuthVersion(userId: string): number {
+    const user = this.data.users.find((u) => u.id === userId) as (User & { authVersion?: number }) | undefined;
+    return Number.isSafeInteger(user?.authVersion) && (user?.authVersion as number) >= 0
+      ? (user?.authVersion as number)
+      : 0;
+  }
+
+  public isAuthVersionCurrent(userId: string, version: number): boolean {
+    return this.getAuthVersion(userId) === version;
+  }
+
   public recordUserLoginSuccess(userId: string) {
     const idx = this.data.users.findIndex((u) => u.id === userId);
     if (idx === -1) return;
@@ -1414,6 +1425,8 @@ class Database {
     const user = this.data.users.find((u) => u.id === userId);
     if (!user) return false;
     user.passwordHash = bcrypt.hashSync(newPassword, 10);
+    const versionedUser = user as User & { authVersion?: number };
+    versionedUser.authVersion = (Number.isSafeInteger(versionedUser.authVersion) ? versionedUser.authVersion! : 0) + 1;
     this.save();
     return true;
   }
