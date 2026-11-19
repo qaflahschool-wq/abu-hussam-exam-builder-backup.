@@ -134,4 +134,23 @@ export class QuestionImageStorage {
       byteSize: Number(row.byte_size),
     };
   }
+
+  async deleteForOwner(imageId: string, ownerId: string): Promise<boolean> {
+    assertSafeSegment(imageId, 'image id');
+    assertSafeSegment(ownerId, 'owner id');
+    const row = await this.database.prepare(
+      'SELECT object_key FROM question_images WHERE id = ? AND owner_id = ? LIMIT 1'
+    ).bind(imageId, ownerId).first<{ object_key: string }>();
+    if (!row) return false;
+
+    const removed = await this.database.prepare(
+      'DELETE FROM question_images WHERE id = ? AND owner_id = ?'
+    ).bind(imageId, ownerId).run();
+    if (!removed.success || Number(removed.meta?.changes || 0) !== 1) {
+      throw new Error('Image metadata could not be removed');
+    }
+    // Any failed R2 deletion leaves only a private orphan, never an exposed object.
+    await this.bucket.delete(row.object_key);
+    return true;
+  }
 }
