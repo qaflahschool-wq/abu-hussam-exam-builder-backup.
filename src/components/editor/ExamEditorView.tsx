@@ -1172,14 +1172,21 @@ export const ExamEditorView: React.FC<ExamEditorViewProps> = ({
 
   const handleUploadQuestionImage = async (sIdx: number, qIdx: number, file: File) => {
     try {
+      const question = exam.sections[sIdx]?.questions[qIdx];
+      if (!question || !user?.id) throw new Error('تعذر تحديد السؤال أو المستخدم الحالي.');
       const imageDataUrl = await prepareQuestionImage(file);
+      const uploaded = await api.uploadQuestionImage(question.id, imageDataUrl);
+      if (question.imageStorageId) {
+        await api.deleteQuestionImage(question.imageStorageId).catch(() => undefined);
+      }
       updateQuestion(sIdx, qIdx, {
-        imageDataUrl,
-        imageWidthPercent: exam.sections[sIdx]?.questions[qIdx]?.imageWidthPercent || 60,
+        imageDataUrl: undefined,
+        imageStorageId: uploaded.image.id,
+        imageWidthPercent: question.imageWidthPercent || 60,
         keepTogether: true,
       });
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'تعذر رفع الصورة.');
+      window.alert(error instanceof Error ? error.message : 'تعذر رفع الصورة إلى التخزين الآمن.');
     }
   };
 
