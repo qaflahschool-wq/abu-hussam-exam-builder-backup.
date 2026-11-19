@@ -660,9 +660,16 @@ router.get('/system/stats', (req: AuthenticatedRequest, res: Response): void => 
 // ==================== CURRICULA ====================
 
 router.get('/curricula', (req: AuthenticatedRequest, res: Response): void => {
+  const user = req.authUser!;
   const grade = req.query.grade as string | undefined;
   const subjectId = req.query.subjectId as string | undefined;
-  res.json(db.getCurricula(grade, subjectId));
+  if ((grade || subjectId) && !canAccessAcademicScope(user, grade, subjectId)) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
+    return;
+  }
+  res.json(db.getCurricula(grade, subjectId).filter((unit) =>
+    canAccessAcademicScope(user, unit.grade, (unit as any).subjectId)
+  ));
 });
 
 router.post('/curricula/unit', requireSchoolAdminOrOwner, (req: AuthenticatedRequest, res: Response): void => {
@@ -1015,6 +1022,14 @@ router.put('/exams/:id', (req: AuthenticatedRequest, res: Response): void => {
   const existing = db.getExamById(req.params.id);
   if (!existing) {
     res.status(404).json({ error: 'الاختبار غير موجود' });
+    return;
+  }
+  if (!canAccessAcademicScope(
+    user,
+    req.body?.grade || existing.grade,
+    req.body?.subjectId || existing.subjectId || 'subj-en'
+  )) {
+    res.status(403).json({ error: 'لا تملك صلاحية الوصول إلى هذا الصف أو المادة الدراسية' });
     return;
   }
   if (!canAccessOwnedRecord(user, existing, 'edit')) {
@@ -1624,13 +1639,20 @@ router.delete('/documents/:id', requireAIAccess, (req: AuthenticatedRequest, res
 // ==================== ARCHIVE (PRIVATE WORKSPACE SCOPED) ====================
 
 router.get('/archive', (req: AuthenticatedRequest, res: Response): void => {
-  res.json(db.getArchive(req.authUser!.id));
+  const user = req.authUser!;
+  res.json(db.getArchive(user.id).filter((exam) =>
+    canAccessAcademicScope(user, exam.grade, exam.subjectId || 'subj-en')
+  ));
 });
 
 router.post('/archive/:id/restore', (req: AuthenticatedRequest, res: Response): void => {
   const exam = db.getExamById(req.params.id);
   if (!exam) {
     res.status(404).json({ error: 'الاختبار المؤرشف غير موجود' });
+    return;
+  }
+  if (!canAccessAcademicScope(req.authUser!, exam.grade, exam.subjectId || 'subj-en')) {
+    res.status(403).json({ error: 'لا تملك صلاحية استرجاع اختبار لهذا الصف أو المادة' });
     return;
   }
   if ((exam.ownerId || exam.createdBy) !== req.authUser!.id) {
