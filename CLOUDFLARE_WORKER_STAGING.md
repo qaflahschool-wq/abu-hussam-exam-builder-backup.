@@ -11,6 +11,9 @@ This is a staging Worker foundation with a Vite static-asset binding and a growi
 - `GET /api/worker/owner/registration-requests`: owner-only registration request listing, with password hashes removed.
 - `POST /api/worker/owner/registration-requests/:id/approve`: owner-only approval; updates the request and creates its active user in one transactional D1 batch, reusing the bcrypt hash created at signup.
 - `POST /api/worker/owner/registration-requests/:id/reject` and `/needs-edit`: owner-only review actions.
+- `POST /api/worker/question-images`: authenticated upload to private R2; owner identity comes from the verified session, not the request body.
+- `GET` and `DELETE /api/worker/question-images/:id`: owner-scoped private retrieval and deletion.
+- `POST /api/worker/exams/:id/export-pdf`: authenticated PDF generation through the Cloudflare Browser Run binding.
 
 Unknown paths return 404. The entrypoint does not accept identity headers and does not expose a wildcard CORS policy. The intended deployment is same-origin; cross-origin browser calls remain unavailable until an explicit origin allowlist is implemented.
 
@@ -26,9 +29,9 @@ Unknown paths return 404. The entrypoint does not accept identity headers and do
 
 ## Staging bindings
 
-`wrangler.jsonc` points only to the isolated D1 database `abu-hussam-exam-builder-staging` and the Vite `dist` static asset directory. SPA fallback is enabled and `/api/*` is routed through the Worker first. It has `workers_dev: false`, no production route, no R2 binding, and no production resource identifiers.
+`wrangler.jsonc` points to the isolated staging D1 database, the isolated staging R2 bucket, the Browser Run binding, and the Vite `dist` static asset directory. SPA fallback is enabled and `/api/*` is routed through the Worker first. It has `workers_dev: false`, no production route, and no production resource identifiers.
 
-Configure the session signing secret as a Cloudflare Worker secret in the staging environment before using authenticated routes. Never commit the value to Git.
+Configure the session signing secret as a Cloudflare Worker secret in the staging environment before using authenticated routes. Never commit the value to Git. R2 and Browser Run bindings take effect only after the Worker is deployed with this configuration.
 
 ## Local validation
 
@@ -42,8 +45,8 @@ npm run build
 npm run worker:dry-run
 ```
 
-These checks have not yet been confirmed for the latest auth implementation. Do not claim the Worker is deployed or that these tests passed until CI reports success and a staging-only smoke test completes.
+These checks have not yet been confirmed for the latest Worker, R2, and PDF changes. Do not claim the Worker is deployed or that these tests passed until CI reports success and a staging-only runtime smoke test completes.
 
 ## Important limitations
 
-This Worker is not yet the complete exam application. The static asset configuration can serve the Vite frontend after a build, but the frontend's API client has not been switched to the Worker yet. The Worker still does not implement the remaining question/exam CRUD, image routes, or PDF generation. The current Express server and its synchronous JSON-file database remain the active application. No data import or production cutover is performed by this foundation.
+This Worker is not yet the complete exam application. The frontend now uses Worker endpoints for sign-in, session lookup, registration, owner registration review, question-image upload/retrieval, and PDF export. Most other API methods still point to Express routes and are not yet implemented in Worker. Existing Base64 question images and exam records have not been bulk-migrated to D1/R2. PDF generation is wired to Browser Run, but its Arabic typography, image embedding, page breaks, and final layout still require a real staging render and visual acceptance test. The current Express server and its synchronous JSON-file database remain the active application for unmigrated functions. No data import or production cutover is performed by this foundation.
