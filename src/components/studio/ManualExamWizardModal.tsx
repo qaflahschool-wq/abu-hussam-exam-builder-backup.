@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { api } from '../../services/api.ts';
+import { prepareQuestionImage } from '../../utils/questionImage.ts';
 import {
   Exam,
   ExamCategory,
@@ -271,14 +272,13 @@ export const ManualExamWizardModal: React.FC<ManualExamWizardModalProps> = ({ on
     setStep2Questions((prev) => prev.filter((q) => q.id !== qId));
   };
 
-  const handleWizardImageUpload = (qId: string, file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        updateWizardQuestion(qId, { imageDataUrl: reader.result });
-      }
-    };
-    reader.readAsDataURL(file);
+  const handleWizardImageUpload = async (qId: string, file: File) => {
+    try {
+      const imageDataUrl = await prepareQuestionImage(file);
+      updateWizardQuestion(qId, { imageDataUrl, imageWidthPercent: 60, keepTogether: true });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'تعذر رفع الصورة.');
+    }
   };
 
   const step2MarksSum = step2Questions.reduce((sum, q) => sum + (Number(q.marks) || 0), 0);
@@ -798,24 +798,31 @@ export const ManualExamWizardModal: React.FC<ManualExamWizardModalProps> = ({ on
                       </div>
                     )}
 
-                    {/* Quick Image Upload */}
-                    {q.type === 'Image Question' && (
-                      <div className="flex items-center gap-2">
-                        <label className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold cursor-pointer flex items-center gap-1.5">
-                          <ImageIcon className="w-3.5 h-3.5 text-[#1B5E3A]" />
-                          <span>{q.imageDataUrl ? 'تغيير الصورة' : 'رفع صورة للسؤال'}</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) handleWizardImageUpload(q.id, f);
-                            }}
-                          />
-                        </label>
-                        {q.imageDataUrl && <span className="text-[11px] text-[#1B5E3A] font-bold">تم إرفاق الصورة ✓</span>}
-                      </div>
+                    {/* Optional image attachment for every question type */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold cursor-pointer flex items-center gap-1.5 touch-target-min">
+                        <ImageIcon className="w-3.5 h-3.5 text-[#1B5E3A]" />
+                        <span>{q.imageDataUrl ? 'تغيير صورة السؤال' : 'إرفاق صورة بالسؤال'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleWizardImageUpload(q.id, f);
+                            e.currentTarget.value = '';
+                          }}
+                        />
+                      </label>
+                      {q.imageDataUrl && (
+                        <>
+                          <span className="text-[11px] text-[#1B5E3A] font-bold">تم إرفاق الصورة ✓</span>
+                          <button type="button" onClick={() => updateWizardQuestion(q.id, { imageDataUrl: undefined })} className="text-[11px] text-rose-600 font-bold">إزالة الصورة</button>
+                        </>
+                      )}
+                    </div>
+                    {q.imageDataUrl && (
+                      <img src={q.imageDataUrl} alt={q.imageCaption || 'معاينة صورة السؤال'} className="mx-auto max-h-40 max-w-full rounded-lg border border-slate-200 object-contain" />
                     )}
                   </div>
                 ))}
