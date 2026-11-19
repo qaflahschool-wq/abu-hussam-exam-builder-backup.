@@ -105,7 +105,6 @@ export async function exportExamHtmlToPdf(options: PdfExportOptions): Promise<Bu
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--allow-file-access-from-files',
       '--font-render-hinting=none',
       `--user-data-dir=${tmpProfileDir}`,
       '--print-to-pdf-no-header',
