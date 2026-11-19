@@ -1,8 +1,8 @@
-export const MAX_QUESTION_IMAGE_BYTES = 4 * 1024 * 1024;
+export const MAX_QUESTION_IMAGE_BYTES = 2.8 * 1024 * 1024;
 const MAX_SOURCE_IMAGE_BYTES = 15 * 1024 * 1024;
 
 export async function prepareQuestionImage(file: File): Promise<string> {
-  if (!file.type.startsWith('image/')) throw new Error('يرجى اختيار ملف صورة صالح.');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('الصيغ المدعومة هي PNG وJPG وWEBP فقط.');
   if (file.size > MAX_SOURCE_IMAGE_BYTES) throw new Error('حجم الصورة الأصلية كبير جداً. الحد الأقصى 15 ميجابايت.');
 
   const sourceUrl = await new Promise<string>((resolve, reject) => {
