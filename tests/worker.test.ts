@@ -156,3 +156,30 @@ test('Worker login verifies the existing bcrypt password format and issues a sig
   assert.equal(body.user.id, 'u-login');
   assert.equal('passwordHash' in body.user, false);
 });
+
+test('Worker registration review listing is restricted to platform owners', async () => {
+  const owner = { id: 'owner-1', username: 'platform.owner', role: 'PlatformOwner', status: 'ACTIVE', name: 'Platform Owner', authVersion: 0 };
+  const token = await signWorkerAuthToken({ id: owner.id, role: owner.role }, SECRET, {
+    getAuthVersion: async () => 0,
+  }, 3600);
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/owner/registration-requests', {
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    { DB: authDatabase(owner) as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json() as { requests: unknown[] }).requests, []);
+
+  const teacher = { ...owner, id: 'teacher-2', username: 'teacher.two', role: 'Teacher' };
+  const teacherToken = await signWorkerAuthToken({ id: teacher.id, role: teacher.role }, SECRET, {
+    getAuthVersion: async () => 0,
+  }, 3600);
+  const denied = await worker.fetch(
+    new Request('https://worker.test/api/worker/owner/registration-requests', {
+      headers: { authorization: `Bearer ${teacherToken}` },
+    }),
+    { DB: authDatabase(teacher) as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(denied.status, 403);
+});
