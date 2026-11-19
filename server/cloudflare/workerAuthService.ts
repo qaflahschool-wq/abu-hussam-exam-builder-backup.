@@ -220,7 +220,7 @@ export class WorkerAuthService {
       passwordHash: rawRequest.passwordHash,
       authVersion: 0,
     };
-    const updatedRequest = {
+    const updatedRequest: Record<string, unknown> = {
       ...rawRequest,
       status: 'APPROVED',
       reviewedBy: String(reviewer.id),
@@ -268,7 +268,7 @@ export class WorkerAuthService {
       throw new Error('Registration request is no longer pending');
     }
     const now = new Date().toISOString();
-    const updated = {
+    const updated: Record<string, unknown> = {
       ...record,
       status,
       reviewedBy: String(reviewer.id),
