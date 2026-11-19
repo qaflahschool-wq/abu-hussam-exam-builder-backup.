@@ -60,17 +60,11 @@ export function getAuthorizedSubjectsForUser(subjects: Subject[], user: User | n
     user.role === 'Administrator' ||
     user.role === 'SchoolAdmin';
 
-  if (
-    isUnrestrictedRole ||
-    !Array.isArray(user.assignedSubjects) ||
-    user.assignedSubjects.length === 0 ||
-    user.assignedSubjects.includes('all')
-  ) {
-    return activeSorted;
-  }
+  if (isUnrestrictedRole) return activeSorted;
+  if (!Array.isArray(user.assignedSubjects) || user.assignedSubjects.length === 0) return [];
 
-  const allowed = activeSorted.filter((s) => user.assignedSubjects!.includes(s.id));
-  return allowed.length > 0 ? allowed : activeSorted;
+  if (user.assignedSubjects.includes('all')) return activeSorted;
+  return activeSorted.filter((s) => user.assignedSubjects!.includes(s.id));
 }
 
 export function getAuthorizedGradesForUser(user: User | null | undefined): GradeCatalogEntry[] {
@@ -81,17 +75,11 @@ export function getAuthorizedGradesForUser(user: User | null | undefined): Grade
     user.role === 'Administrator' ||
     user.role === 'SchoolAdmin';
 
-  if (
-    isUnrestrictedRole ||
-    !Array.isArray(user.assignedGrades) ||
-    user.assignedGrades.length === 0 ||
-    user.assignedGrades.includes('all')
-  ) {
-    return BASIC_GRADE_CATALOG;
-  }
+  if (isUnrestrictedRole) return BASIC_GRADE_CATALOG;
+  if (!Array.isArray(user.assignedGrades) || user.assignedGrades.length === 0) return [];
 
-  const filtered = BASIC_GRADE_CATALOG.filter((g) => user.assignedGrades!.includes(g.value));
-  return filtered.length > 0 ? filtered : BASIC_GRADE_CATALOG;
+  if (user.assignedGrades.includes('all')) return BASIC_GRADE_CATALOG;
+  return BASIC_GRADE_CATALOG.filter((g) => user.assignedGrades!.includes(g.value));
 }
 
 export function getGradeLabelAr(gradeValue?: string): string {
