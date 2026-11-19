@@ -1288,7 +1288,11 @@ class Database {
 
   // Users
   public getUsers(): User[] {
-    return this.data.users.map(({ passwordHash, ...user }) => user);
+    return this.data.users.map((storedUser) => {
+      const { passwordHash, authVersion: _authVersion, ...safeUser } =
+        storedUser as User & { authVersion?: number };
+      return safeUser;
+    });
   }
 
   public findUserByUsername(username: string) {
@@ -1417,7 +1421,8 @@ class Database {
     }
     this.data.users[idx] = next;
     this.save();
-    const { passwordHash: _, ...rest } = next;
+    const { passwordHash: _, authVersion: _authVersion, ...rest } =
+      next as User & { authVersion?: number };
     return rest;
   }
 
