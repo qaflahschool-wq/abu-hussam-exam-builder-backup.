@@ -152,8 +152,8 @@ router.post('/auth/register', (req, res: Response): void => {
     return;
   }
 
-  if (!password || String(password).length < 6) {
-    res.status(400).json({ error: 'كلمة المرور يجب أن لا تقل عن 6 أحرف' });
+  if (!password || String(password).length < 8) {
+    res.status(400).json({ error: 'كلمة المرور يجب ألا تقل عن 8 أحرف' });
     return;
   }
 
@@ -452,8 +452,8 @@ router.post('/auth/switch-user', requirePlatformOwner, (req: AuthenticatedReques
 router.post('/auth/reset-password', (req: AuthenticatedRequest, res: Response): void => {
   const actor = req.authUser!;
   const { userId, newPassword } = req.body;
-  if (!userId || !newPassword || String(newPassword).length < 4) {
-    res.status(400).json({ error: 'كلمة المرور يجب ألا تقل عن 4 أحرف' });
+  if (!userId || !newPassword || String(newPassword).length < 8) {
+    res.status(400).json({ error: 'كلمة المرور يجب ألا تقل عن 8 أحرف' });
     return;
   }
 
@@ -2131,6 +2131,10 @@ router.post('/system/users', requireSchoolAdminOrOwner, (req: AuthenticatedReque
   const { username, name, role, email, phone, password, assignedSubjects, assignedGrades, hasAIAccess } = req.body;
   if (!username || !password || !name) {
     res.status(400).json({ error: 'يرجى إكمال بيانات المستخدم' });
+    return;
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    res.status(400).json({ error: 'كلمة مرور الحساب يجب ألا تقل عن 8 أحرف' });
     return;
   }
 
