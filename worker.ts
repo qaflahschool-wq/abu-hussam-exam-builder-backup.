@@ -300,6 +300,8 @@ export default {
         if (!auth.ok) return json({error:auth.error},auth.status);
         const actor=auth.user as Record<string,unknown>;
         if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(actor.role))) return json({error:'FORBIDDEN'},403);
+        const subjectPermissions=actor.delegatedPermissions&&typeof actor.delegatedPermissions==='object'?actor.delegatedPermissions as Record<string,unknown>:{};
+        if (String(actor.role)==='SchoolAdmin'&&subjectPermissions.canManageSubjects===false) return json({error:'FORBIDDEN_SUBJECT_MANAGEMENT'},403);
         const tail=url.pathname.slice('/api/worker/catalog/subjects'.length).replace(/^\/+/,'');
         if (request.method==='POST' && !tail) {
           const body:unknown=await request.json().catch(()=>null);
@@ -394,7 +396,10 @@ export default {
       try {
         const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
         if (!auth.ok) return json({error:auth.error},auth.status);
-        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(auth.user.role))) return json({error:'FORBIDDEN'},403);
+        const curriculumActor=auth.user as Record<string,unknown>;
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(curriculumActor.role))) return json({error:'FORBIDDEN'},403);
+        const curriculumPermissions=curriculumActor.delegatedPermissions&&typeof curriculumActor.delegatedPermissions==='object'?curriculumActor.delegatedPermissions as Record<string,unknown>:{};
+        if (String(curriculumActor.role)==='SchoolAdmin'&&curriculumPermissions.canManageCurricula===false) return json({error:'FORBIDDEN_CURRICULUM_MANAGEMENT'},403);
         const body:unknown=await request.json().catch(()=>null);
         if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid curriculum unit'},400);
         const input=body as Record<string,unknown>;
@@ -412,7 +417,10 @@ export default {
       try {
         const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
         if (!auth.ok) return json({error:auth.error},auth.status);
-        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(auth.user.role))) return json({error:'FORBIDDEN'},403);
+        const curriculumActor=auth.user as Record<string,unknown>;
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(curriculumActor.role))) return json({error:'FORBIDDEN'},403);
+        const curriculumPermissions=curriculumActor.delegatedPermissions&&typeof curriculumActor.delegatedPermissions==='object'?curriculumActor.delegatedPermissions as Record<string,unknown>:{};
+        if (String(curriculumActor.role)==='SchoolAdmin'&&curriculumPermissions.canManageCurricula===false) return json({error:'FORBIDDEN_CURRICULUM_MANAGEMENT'},403);
         const row=await env.DB.prepare('SELECT record_json FROM curricula WHERE id=? LIMIT 1').bind(curriculumId).first<{record_json:string}>();
         if (!row) return json({error:'CURRICULUM_NOT_FOUND'},404);
         if (request.method==='DELETE') {
