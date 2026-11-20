@@ -270,7 +270,7 @@ class ApiService {
   }
 
   async deleteSubject(id: string): Promise<{ success: boolean }> {
-    return this.request(`/api/subjects/${id}`, {
+    return this.request(`/api/worker/catalog/subjects/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
@@ -304,7 +304,7 @@ class ApiService {
   }
 
   async deleteUnit(id: string): Promise<{ success: boolean }> {
-    return this.request(`/api/curricula/unit/${id}`, {
+    return this.request(`/api/worker/curricula/unit/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
@@ -403,7 +403,7 @@ class ApiService {
   }
 
   async deleteExam(id: string): Promise<{ success: boolean }> {
-    return this.request(`/api/exams/${id}`, {
+    return this.request(`/api/worker/exams/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
@@ -434,7 +434,7 @@ class ApiService {
   }
 
   async logExamExport(examId: string, mode: 'StudentPaper' | 'TeacherAnswerKey'): Promise<{ success: boolean }> {
-    return this.request(`/api/exams/${examId}/export-log`, {
+    return this.request(`/api/worker/exams/${encodeURIComponent(examId)}/export-log`, {
       method: 'POST',
       body: JSON.stringify({ mode }),
     });
