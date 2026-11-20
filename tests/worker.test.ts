@@ -386,6 +386,92 @@ test('Worker PDF export requires an authenticated session and uses Browser Run',
   assert.equal(denied.status, 401);
 });
 
+
+test('Worker creates D1 questions using the authenticated owner and assigned scope', async () => {
+  const scopedUser = { ...user, assignedGrades: ['Grade 7'], assignedSubjects: ['subj-en'] };
+  const token = await signWorkerAuthToken({ id: scopedUser.id, role: scopedUser.role }, SECRET, {
+    getAuthVersion: async () => 0,
+  }, 3600);
+  let inserted: { sql: string; values: unknown[] } | undefined;
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+              if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(scopedUser) } as T;
+              return null;
+            },
+            async all<T>() { return { success: true, results: [] as T[] }; },
+            async run() {
+              if (sql.startsWith('INSERT INTO questions')) inserted = { sql, values };
+              return { success: true, meta: { changes: 1 } };
+            },
+          };
+        },
+      };
+    },
+  };
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/questions', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ownerId: 'forged-owner',
+        grade: 'Grade 7',
+        subjectId: 'subj-en',
+        unitId: 'unit-1',
+        questionText: 'Choose the correct answer.',
+        modelAnswer: 'A',
+      }),
+    }),
+    { DB: db as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { success: boolean; question: Record<string, unknown> };
+  assert.equal(body.success, true);
+  assert.equal(body.question.ownerId, scopedUser.id);
+  assert.equal(body.question.subjectId, 'subj-en');
+  assert.equal(inserted?.values[1], scopedUser.id);
+  assert.equal(inserted?.values[2], 'subj-en');
+});
+
+test('Worker rejects question creation outside the authenticated academic scope', async () => {
+  const scopedUser = { ...user, assignedGrades: ['Grade 7'], assignedSubjects: ['subj-en'] };
+  const token = await signWorkerAuthToken({ id: scopedUser.id, role: scopedUser.role }, SECRET, {
+    getAuthVersion: async () => 0,
+  }, 3600);
+  let writes = 0;
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(..._values: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+              if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(scopedUser) } as T;
+              return null;
+            },
+            async all<T>() { return { success: true, results: [] as T[] }; },
+            async run() { writes++; return { success: true, meta: { changes: 1 } }; },
+          };
+        },
+      };
+    },
+  };
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/questions', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ grade: 'Grade 8', subjectId: 'subj-en', questionText: 'Q', modelAnswer: 'A' }),
+    }),
+    { DB: db as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 403);
+  assert.equal(writes, 0);
+});
+
 test('Worker question bank returns only the authenticated owner and assigned academic scope', async () => {
   const scopedUser = {
     ...user,
