@@ -31,6 +31,7 @@ interface D1PreparedStatement {
 
 interface D1Database {
   prepare(query: string): D1PreparedStatement;
+  batch?(statements: D1PreparedStatement[]): Promise<D1Result[]>;
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -701,6 +702,84 @@ export default {
           questions:Number(questions?.total||0),exams:Number(exams?.total||0),questionImages:Number(images?.total||0),backups:Number(backups?.total||0)});
       } catch(e) { console.error('Worker storage status failed',e); return json({error:'Storage status unavailable'},500); }
     }
+
+    const restoreSnapshot=async (snapshot:unknown) => {
+      if (!snapshot||typeof snapshot!=='object'||(snapshot as Record<string,unknown>).format!=='ABU_HUSSAM_D1_BACKUP_V1') throw new Error('Backup format is invalid');
+      const tables=(snapshot as Record<string,unknown>).tables;
+      if (!tables||typeof tables!=='object'||Array.isArray(tables)) throw new Error('Backup tables are invalid');
+      if (!env.DB.batch) throw new Error('Transactional D1 batch is unavailable');
+      const columns:Record<string,string[]> = {
+        app_users:['id','username','role','status','record_json','created_at','updated_at'],
+        registration_requests:['id','username','status','record_json','created_at','updated_at'],
+        notifications:['id','user_id','record_json','created_at'],
+        subjects:['id','is_active','sort_order','record_json'],
+        school_settings:['singleton_id','record_json','updated_at'],
+        curricula:['id','grade','subject_id','record_json'],
+        questions:['id','owner_id','subject_id','grade','unit_id','record_json','created_at','updated_at'],
+        exams:['id','owner_id','subject_id','grade','status','record_json','created_at','updated_at'],
+        archived_exams:['id','owner_id','subject_id','grade','status','record_json','archived_at'],
+        layout_templates:['id','owner_id','record_json','created_at'],
+        analyzed_documents:['id','owner_id','record_json','created_at'],
+        ai_settings:['singleton_id','record_json','updated_at'],
+        ai_usage_logs:['id','user_id','created_at','record_json'],
+        audit_logs:['id','user_id','timestamp','prev_hash','entry_hash','record_json'],
+        question_images:['id','owner_id','question_id','object_key','content_type','byte_size','checksum_sha256','record_json','created_at'],
+        auth_rate_limits:['bucket_key','window_started_at','attempts','locked_until'],
+        app_migrations:['version','applied_at','checksum']
+      };
+      const source=tables as Record<string,unknown>;
+      const statements:D1PreparedStatement[]=[];
+      for (const table of backupTables) {
+        const rows=source[table];
+        if (!Array.isArray(rows)) throw new Error('Backup is missing table '+table);
+        const names=columns[table];
+        statements.push(env.DB.prepare('DELETE FROM '+table));
+        for (const item of rows) {
+          if (!item||typeof item!=='object'||Array.isArray(item)) throw new Error('Malformed row in '+table);
+          const row=item as Record<string,unknown>;
+          if (names.some(name=>!(name in row))) throw new Error('Incomplete row in '+table);
+          statements.push(env.DB.prepare('INSERT INTO '+table+' ('+names.join(',')+') VALUES ('+names.map(()=>'?').join(',')+')')
+            .bind(...names.map(name=>row[name]===undefined?null:row[name])));
+        }
+      }
+      const results=await env.DB.batch(statements);
+      if (results.some(result=>!result.success)) throw new Error('One or more D1 restore statements failed');
+    };
+    if (url.pathname==='/api/worker/system/restore' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await isPlatformOwner(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.isOwner) return json({error:'FORBIDDEN'},403);
+      try {
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||typeof (body as Record<string,unknown>).filename!=='string') return json({error:'Backup filename is required'},400);
+        const filename=String((body as Record<string,unknown>).filename);
+        const row=await env.DB.prepare('SELECT * FROM backup_metadata WHERE filename=? LIMIT 1').bind(filename).first<Record<string,unknown>>();
+        if (!row) return json({error:'BACKUP_NOT_FOUND'},404);
+        const plain=await readBackup(row);
+        const snapshot=JSON.parse(new TextDecoder().decode(plain));
+        await makeBackup(check.ownerId);
+        await restoreSnapshot(snapshot);
+        return json({success:true});
+      } catch(e) { console.error('Worker backup restore failed',e); return json({error:'Backup restore failed; a pre-restore backup was attempted'},503); }
+    }
+    if (url.pathname==='/api/worker/system/restore-upload' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await isPlatformOwner(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.isOwner) return json({error:'FORBIDDEN'},403);
+      try {
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||typeof (body as Record<string,unknown>).content!=='string') return json({error:'Backup JSON content is required'},400);
+        const content=String((body as Record<string,unknown>).content);
+        if (content.length>30_000_000) return json({error:'Backup file is too large'},413);
+        const snapshot=JSON.parse(content);
+        await makeBackup(check.ownerId);
+        await restoreSnapshot(snapshot);
+        return json({success:true});
+      } catch(e) { console.error('Worker uploaded backup restore failed',e); return json({error:'Uploaded backup could not be restored; a pre-restore backup was attempted'},400); }
+    }
+
     if (url.pathname==='/api/worker/system/backup' && request.method==='POST') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
       const check=await isPlatformOwner(request);
