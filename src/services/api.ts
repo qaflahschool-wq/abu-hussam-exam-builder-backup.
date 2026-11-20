@@ -535,7 +535,7 @@ class ApiService {
 
   // Reusable Private Layout Templates
   async getLayoutTemplates(): Promise<LayoutTemplate[]> {
-    return this.request('/api/layout-templates');
+    return this.request('/api/worker/layout-templates');
   }
 
   async saveLayoutTemplate(payload: {
@@ -545,14 +545,14 @@ class ApiService {
     description?: string;
     layoutConfig: ExamLayoutConfig;
   }): Promise<{ success: boolean; template: LayoutTemplate }> {
-    return this.request('/api/layout-templates', {
+    return this.request('/api/worker/layout-templates', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   }
 
   async deleteLayoutTemplate(id: string): Promise<{ success: boolean }> {
-    return this.request(`/api/layout-templates/${id}`, {
+    return this.request(`/api/worker/layout-templates/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
@@ -853,22 +853,22 @@ class ApiService {
 
   // Analyzed Documents Library (Owner Only)
   async getAnalyzedDocuments(): Promise<AnalyzedDocument[]> {
-    return this.request('/api/documents');
+    return this.request('/api/worker/documents');
   }
 
   async getAnalyzedDocumentById(id: string): Promise<AnalyzedDocument> {
-    return this.request(`/api/documents/${id}`);
+    return this.request(`/api/worker/documents/${encodeURIComponent(id)}`);
   }
 
   async saveAnalyzedDocument(doc: Partial<AnalyzedDocument>): Promise<{ success: boolean; document: AnalyzedDocument }> {
-    return this.request('/api/documents', {
+    return this.request('/api/worker/documents', {
       method: 'POST',
       body: JSON.stringify(doc),
     });
   }
 
   async deleteAnalyzedDocument(id: string): Promise<{ success: boolean }> {
-    return this.request(`/api/documents/${id}`, {
+    return this.request(`/api/worker/documents/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
