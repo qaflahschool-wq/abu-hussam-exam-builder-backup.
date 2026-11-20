@@ -11,6 +11,7 @@ This is a staging Worker foundation with a Vite static-asset binding and a growi
 - `GET /api/worker/owner/registration-requests`: owner-only registration request listing, with password hashes removed.
 - `POST /api/worker/owner/registration-requests/:id/approve`: owner-only approval; updates the request and creates its active user in one transactional D1 batch, reusing the bcrypt hash created at signup.
 - `POST /api/worker/owner/registration-requests/:id/reject` and `/needs-edit`: owner-only review actions.
+- `GET /api/worker/questions`: authenticated question-bank read from D1, restricted to the signed-in user's owned questions and assigned grade/subject scope.
 - `POST /api/worker/question-images`: authenticated upload to private R2; owner identity comes from the verified session, not the request body.
 - `GET` and `DELETE /api/worker/question-images/:id`: owner-scoped private retrieval and deletion.
 - `POST /api/worker/exams/:id/export-pdf`: authenticated PDF generation through the Cloudflare Browser Run binding.
@@ -49,4 +50,4 @@ These checks have not yet been confirmed for the latest Worker, R2, and PDF chan
 
 ## Important limitations
 
-This Worker is not yet the complete exam application. The frontend now uses Worker endpoints for sign-in, session lookup, registration, owner registration review, question-image upload/retrieval, and PDF export. Most other API methods still point to Express routes and are not yet implemented in Worker. Existing Base64 question images and exam records have not been bulk-migrated to D1/R2. PDF generation is wired to Browser Run, but its Arabic typography, image embedding, page breaks, and final layout still require a real staging render and visual acceptance test. The current Express server and its synchronous JSON-file database remain the active application for unmigrated functions. No data import or production cutover is performed by this foundation.
+This Worker is not yet the complete exam application. The frontend now uses Worker endpoints for sign-in, session lookup, registration, owner registration review, question-image upload/retrieval, and PDF export. Question creation, editing, deletion, and most other API methods still point to Express routes and are not yet implemented in Worker. Existing Base64 question images and exam records have not been bulk-migrated to D1/R2. PDF generation is wired to Browser Run, but its Arabic typography, image embedding, page breaks, and final layout still require a real staging render and visual acceptance test. The current Express server and its synchronous JSON-file database remain the active application for unmigrated functions. No data import or production cutover is performed by this foundation.
