@@ -366,6 +366,25 @@ export default {
         return json(list);
       } catch(e) { console.error('Worker curricula read failed',e); return json({error:'Curriculum unavailable'},500); }
     }
+
+    if (url.pathname===curriculumCollection+'/reset' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        if (String(auth.user.role)!=='PlatformOwner') return json({error:'FORBIDDEN'},403);
+        const removed=await env.DB.prepare('DELETE FROM curricula').run();
+        if (!removed.success) return json({error:'CURRICULUM_RESET_FAILED'},503);
+        for (const seedUnit of DEFAULT_CURRICULA) {
+          const unit: Record<string,unknown>={...seedUnit,subjectId:typeof seedUnit.subjectId==='string'?seedUnit.subjectId:'subj-en'};
+          const inserted=await env.DB.prepare('INSERT INTO curricula (id,grade,subject_id,record_json) VALUES (?,?,?,?)')
+            .bind(String(unit.id),String(unit.grade),String(unit.subjectId),JSON.stringify(unit)).run();
+          if (!inserted.success) return json({error:'CURRICULUM_RESET_PARTIAL'},503);
+        }
+        return json({success:true,message:'Curriculum restored to the canonical starter dataset'});
+      } catch(e) { console.error('Worker curriculum reset failed',e); return json({error:'Curriculum reset failed'},500); }
+    }
+
     if (url.pathname===curriculumCollection+'/unit' && request.method==='POST') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
       try {
@@ -512,6 +531,44 @@ export default {
         console.error('Worker school identity read failed', error);
         return json({ error: 'School identity unavailable' }, 500);
       }
+    }
+
+
+    if (url.pathname==='/api/worker/system/stats' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const userId=String(auth.user.id);
+        const [exams,archive,questions,curricula,subjects,recent]=await Promise.all([
+          env.DB.prepare('SELECT record_json FROM exams WHERE owner_id=?').bind(userId).all<{record_json:string}>(),
+          env.DB.prepare('SELECT record_json FROM archived_exams WHERE owner_id=?').bind(userId).all<{record_json:string}>(),
+          env.DB.prepare('SELECT record_json FROM questions WHERE owner_id=?').bind(userId).all<{record_json:string}>(),
+          env.DB.prepare('SELECT record_json FROM curricula').all<{record_json:string}>(),
+          env.DB.prepare('SELECT COUNT(*) AS total FROM subjects WHERE is_active=1').first<{total:number}>(),
+          env.DB.prepare('SELECT record_json FROM exams WHERE owner_id=? ORDER BY created_at DESC LIMIT 5').bind(userId).all<{record_json:string}>()
+        ]);
+        if (![exams,archive,questions,curricula].every(x=>x.success)) return json({error:'Dashboard statistics unavailable'},503);
+        const parse=(rows:{record_json:string}[])=>rows.flatMap(row=>{try{return [JSON.parse(row.record_json) as Record<string,unknown>]}catch{return[]}});
+        const examList=parse(exams.results||[]), archiveList=parse(archive.results||[]), questionList=parse(questions.results||[]), curriculumList=parse(curricula.results||[]);
+        const grades=Array.from({length:9},(_,i)=>'Grade '+(i+1));
+        const gradeStats=Object.fromEntries(grades.map(grade=>[grade,{
+          examsCount:examList.filter(x=>x.grade===grade).length,
+          questionsCount:questionList.filter(x=>x.grade===grade).length,
+          unitsCount:curriculumList.filter(x=>x.grade===grade).length
+        }]));
+        return json({
+          totalExams:examList.length,
+          savedExams:examList.filter(x=>x.status==='Approved').length,
+          draftExams:examList.filter(x=>['Draft','Validated'].includes(String(x.status))).length,
+          archivedExams:archiveList.length,
+          totalQuestions:questionList.length,
+          activeSubjectsCount:Number(subjects?.total||0),
+          gradeStats,
+          recentExams:parse(recent.results||[]),
+          hasAIAccess:auth.user.hasAIAccess===true
+        });
+      } catch(e) { console.error('Worker dashboard stats failed',e); return json({error:'Dashboard statistics unavailable'},500); }
     }
 
     if (url.pathname === '/api/worker/health' && request.method === 'GET') {
