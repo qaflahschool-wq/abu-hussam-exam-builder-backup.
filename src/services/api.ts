@@ -339,7 +339,7 @@ class ApiService {
     if (filters?.grammarCategory) params.set('grammarCategory', filters.grammarCategory);
 
     const query = params.toString() ? `?${params.toString()}` : '';
-    return this.request(`/api/questions${query}`);
+    return this.request(`/api/worker/questions${query}`);
   }
 
   async addQuestion(question: Partial<Question>): Promise<{ success: boolean; question: Question }> {
