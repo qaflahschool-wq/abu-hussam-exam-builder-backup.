@@ -365,7 +365,7 @@ export default {
         const save = async (e: Record<string,unknown>) => {
           const createdAt = typeof e.createdAt === 'string' ? e.createdAt : new Date().toISOString();
           const updatedAt = new Date().toISOString();
-          const v = { ...e, createdAt, updatedAt };
+          const v: Record<string, unknown> = { ...e, createdAt, updatedAt };
           const r = await env.DB.prepare(
             'INSERT INTO exams (id, owner_id, subject_id, grade, status, record_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET owner_id=excluded.owner_id, subject_id=excluded.subject_id, grade=excluded.grade, status=excluded.status, record_json=excluded.record_json, updated_at=excluded.updated_at'
           ).bind(String(v.id), String(v.ownerId || v.createdBy || actor.id), String(v.subjectId || 'subj-en'),
