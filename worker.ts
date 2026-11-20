@@ -764,6 +764,142 @@ export default {
       }
     }
 
+
+    const generateGeminiVision=async (model:string,prompt:string,images:Array<{mimeType:string;data:string}>,temperature=0.3) => {
+      if (!env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not configured');
+      const parts:Array<Record<string,unknown>>=[{text:prompt},...images.map(img=>({inline_data:{mime_type:img.mimeType,data:img.data}}))];
+      const endpoint='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(env.GEMINI_API_KEY);
+      const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({contents:[{parts}],generationConfig:{responseMimeType:'application/json',temperature}})});
+      const payload:unknown=await response.json().catch(()=>null);
+      if (!response.ok) throw new Error('Gemini vision request failed with status '+response.status);
+      const candidates=(payload as Record<string,unknown>)?.candidates;
+      const first=Array.isArray(candidates)?candidates[0] as Record<string,unknown>:null;
+      const content=first?.content as Record<string,unknown>|undefined;
+      const responseParts=Array.isArray(content?.parts)?content?.parts as Array<Record<string,unknown>>:[];
+      const textValue=responseParts.map(p=>typeof p.text==='string'?p.text:'').join('');
+      if (!textValue) throw new Error('Gemini returned an empty vision response');
+      return textValue;
+    };
+    if (url.pathname==='/api/worker/vision/analyze' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      if (!env.GEMINI_API_KEY) return json({error:'GEMINI_API_KEY is not configured'},503);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid vision request'},400);
+      const input=body as Record<string,unknown>;
+      const images=Array.isArray(input.images)?input.images as Array<Record<string,unknown>>:[];
+      if (!images.length||images.length>8) return json({error:'Provide between 1 and 8 images'},400);
+      let total=0;
+      const valid=images.every(img=>{
+        if (typeof img.dataUrl!=='string') return false;
+        total+=img.dataUrl.length;
+        return /^data:image\/(png|jpeg|webp);base64,/i.test(img.dataUrl)&&img.dataUrl.length<=5_500_000;
+      });
+      if (!valid||total>9_500_000) return json({error:'Image payload is invalid or too large'},400);
+      const normalized=images.map(img=>{
+        const match=String(img.dataUrl).match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/i);
+        return {mimeType:match?.[1]||'image/jpeg',data:match?.[2]||''};
+      });
+      const model=String((await readAISettings()).primaryModel||aiModels[0].id),started=Date.now();
+      const prompt='Analyze these teacher-provided school worksheet or textbook images for a Yemeni English curriculum. Extract legible text in reading order. Return strict JSON with keys: documentTitle, detectedTopic, suggestedGrade (Grade 7/8/9), suggestedUnitTitle, suggestedUnits, rawText, rawExtractedText, grammarConcepts (array of concept, arabicName, ruleFormula, explanationEn, explanationAr, examples, commonMistakes), vocabulary (array of word, arabicTranslation, partOfSpeech, exampleSentence, phoneticHint), discoveredExercises (array of exerciseType, prompt, instructions, rawItems, items), readingPassages (array of title,text), extractedEntities (characters,locations,actions,relations), imageQualityReport (legible,score,handwritingDetected,blurDetected,cutoffDetected,illegibleSegments,warnings,notes). Never invent unreadable text; mark uncertainty in illegibleSegments. Expected grade: '+String(input.gradeHint||'Grade 7, Grade 8, or Grade 9')+'. Unit hint: '+String(input.unitHint||'').slice(0,500)+'.';
+      try {
+        const raw=await generateGeminiVision(model,prompt,normalized,Number((await readAISettings()).temperature)||0.3);
+        const result=JSON.parse(raw) as Record<string,unknown>;
+        if (!Array.isArray(result.grammarConcepts)) result.grammarConcepts=[];
+        if (!Array.isArray(result.vocabulary)) result.vocabulary=[];
+        if (!Array.isArray(result.discoveredExercises)) result.discoveredExercises=[];
+        if (!Array.isArray(result.suggestedUnits)) result.suggestedUnits=[];
+        result.suggestedGrade=typeof result.suggestedGrade==='string'?result.suggestedGrade:String(input.gradeHint||'Grade 7');
+        result.analyzedAt=new Date().toISOString();result.modelUsed=model;
+        await writeAILog(check.userId,'VISION_ANALYZE',model,'SUCCESS','Analyze '+images.length+' image(s)',Date.now()-started);
+        return json({success:true,result,modelUsed:model});
+      } catch(e) {
+        await writeAILog(check.userId,'VISION_ANALYZE',model,'ERROR','Analyze '+images.length+' image(s)',Date.now()-started,String(e));
+        return json({error:'Image analysis failed'},502);
+      }
+    }
+    if (url.pathname==='/api/worker/vision/generate-questions' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      if (!env.GEMINI_API_KEY) return json({error:'GEMINI_API_KEY is not configured'},503);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid question generation request'},400);
+      const input=body as Record<string,unknown>,analysis=input.analysis as Record<string,unknown>|undefined;
+      const grade=typeof input.grade==='string'?input.grade:'';
+      const contentScope=String(input.contentScope||'CURRICULUM_ENRICHMENT');
+      const types=Array.isArray(input.selectedQuestionTypes)?input.selectedQuestionTypes.map(String):[];
+      const count=Math.min(40,Math.max(1,Number(input.count)||10));
+      if (!analysis||!grade||!types.length) return json({error:'Analysis, grade and question types are required'},400);
+      if (String(input.subjectId||'subj-en')==='subj-quran') return json({error:'AI generation is disabled for Quranic text'},400);
+      const sourceText=[analysis.rawText,analysis.rawExtractedText,analysis.detectedTopic].filter(x=>typeof x==='string').join('\n').slice(0,18000);
+      if (!sourceText.trim()) return json({error:'Source analysis contains no readable text'},400);
+      const model=String((await readAISettings()).primaryModel||aiModels[0].id),started=Date.now();
+      const prompt='Generate '+count+' exam questions strictly grounded in this teacher-provided source. Do not introduce people, places, facts, grammar or answers not supported by the source. Return JSON only as {"questions":[...]}. Each question keys: questionText,instructions,type,difficulty,marks,options,matchingPairs,passage,scrambledWords,modelAnswer,explanation. Grade '+grade+'. Allowed types: '+types.join(', ')+'. Educational level: '+String(input.educationalLevel||'BASIC')+'. Teacher notes: '+String(input.teacherNotes||'').slice(0,1000)+'. Source content:\n'+sourceText;
+      try {
+        const raw=await generateGemini(model,prompt,Number((await readAISettings()).temperature)||0.3);
+        const parsed=JSON.parse(raw) as Record<string,unknown>;
+        if (!Array.isArray(parsed.questions)||!parsed.questions.length) throw new Error('No questions were returned');
+        const questions=(parsed.questions as Array<Record<string,unknown>>).slice(0,count).map((q,index)=>({
+          ...q,id:'q-vision-'+crypto.randomUUID(),ownerId:check.userId,grade,unitId:'vision-generated',
+          unitTitle:String(analysis.suggestedUnitTitle||''),type:types.includes(String(q.type))?String(q.type):types[index%types.length],
+          difficulty:String(q.difficulty||'Medium'),marks:Number(q.marks)||2,
+          questionText:String(q.questionText||''),modelAnswer:String(q.modelAnswer||''),source:'Gemini AI',
+          sourceCode:'IMAGE_SOURCE',educationalLevel:String(input.educationalLevel||'BASIC'),
+          requiresTeacherReview:true,teacherReviewReason:'Generated from an image source; teacher review is required.',
+          createdAt:new Date().toISOString()
+        }));
+        if (questions.some(q=>!q.questionText.trim()||!q.modelAnswer.trim())) throw new Error('One or more generated questions are incomplete');
+        if (input.saveToBank===true) {
+          const user=check.auth.user as Record<string,unknown>;
+          const assignedGrades=Array.isArray(user.assignedGrades)?user.assignedGrades.map(String):[];
+          const assignedSubjects=Array.isArray(user.assignedSubjects)?user.assignedSubjects.map(String):[];
+          if (!(assignedGrades.includes('all')||assignedGrades.includes(grade))||!(assignedSubjects.includes('all')||assignedSubjects.includes(String(input.subjectId||'subj-en')))) return json({error:'FORBIDDEN_ACADEMIC_SCOPE'},403);
+          for (const q of questions) {
+            await env.DB.prepare('INSERT INTO questions (id,owner_id,subject_id,grade,unit_id,record_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,NULL)')
+              .bind(q.id,check.userId,String(input.subjectId||'subj-en'),grade,q.unitId,JSON.stringify(q),String(q.createdAt)).run();
+          }
+        }
+        await writeAILog(check.userId,'VISION_GENERATE_QUESTIONS',model,'SUCCESS','Generate '+questions.length+' image-based questions',Date.now()-started);
+        return json({success:true,questions,modelUsed:model});
+      } catch(e) {
+        await writeAILog(check.userId,'VISION_GENERATE_QUESTIONS',model,'ERROR','Generate image-based questions',Date.now()-started,String(e));
+        return json({error:'Image-based question generation failed'},502);
+      }
+    }
+    if (url.pathname==='/api/worker/vision/validate-fidelity' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid fidelity request'},400);
+      const input=body as Record<string,unknown>,question=input.question as Record<string,unknown>|undefined,analysis=input.analysis as Record<string,unknown>|undefined;
+      if (!question||!analysis) return json({error:'Question and analysis are required'},400);
+      const source=[analysis.rawText,analysis.rawExtractedText,analysis.detectedTopic].filter(x=>typeof x==='string').join(' ').toLowerCase();
+      const text=[question.questionText,question.modelAnswer,...(Array.isArray(question.options)?question.options:[])].filter(x=>typeof x==='string').join(' ').toLowerCase();
+      const words=text.match(/[a-z]{3,}|[\u0600-\u06ff]{3,}/g)||[];
+      const ignored=new Set(['the','and','for','with','from','this','that','what','which','where','when','your','choose','complete','answer','question']);
+      const meaningful=words.filter(x=>!ignored.has(x));
+      const grounded=meaningful.filter(x=>source.includes(x));
+      const foreign=meaningful.filter(x=>!source.includes(x));
+      const score=meaningful.length?Math.round(grounded.length/meaningful.length*100):0;
+      const passed=score>=70;
+      const validatedQuestion={...question,sourceFidelityScore:score,requiresTeacherReview:!passed||score<85,
+        teacherReviewReason:passed?'Review the generated item before using it.':'Some question content is not clearly grounded in the supplied source.',
+        groundedEntities:grounded,fidelityWarning:foreign.length?'Some terms were not found in the source.':undefined};
+      return json({success:true,score,passed,reclassified:false,requiresTeacherReview:!passed||score<85,
+        teacherReviewReason:validatedQuestion.teacherReviewReason,warning:validatedQuestion.fidelityWarning,
+        acceptanceReason:passed?'Most meaningful terms are present in the source.':'Insufficient source overlap; teacher review is required.',
+        groundedEntities:grounded,foreignEntities:foreign,relationalPairsFound:[],
+        metrics:{entityAccuracy:score,relationshipAccuracy:score,contextAccuracy:score,answerGrounding:score,semanticConsistency:score},
+        validatedQuestion});
+    }
+
     if (url.pathname==='/api/worker/exams/validate' && request.method==='POST') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
       const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
