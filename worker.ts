@@ -627,7 +627,7 @@ export default {
           if (!Array.isArray(subjects)||!subjects.length||subjects.includes('all')||!Array.isArray(grades)||!grades.length||grades.includes('all')||!grades.every(x=>typeof x==='string'&&/^Grade [1-9]$/.test(x))) return json({error:'Invalid teacher assignments'},400);
           patch.hasAIAccess=false;
         }
-        const updated={...target,...patch,id:userItemId,updatedAt:new Date().toISOString()};
+        const updated: Record<string,unknown>={...target,...patch,id:userItemId,updatedAt:new Date().toISOString()};
         const saved=await env.DB.prepare('UPDATE app_users SET role=?,status=?,record_json=?,updated_at=? WHERE id=?')
           .bind(String(updated.role),String(updated.status),JSON.stringify(updated),String(updated.updatedAt),userItemId).run();
         if (!saved.success) return json({error:'USER_UPDATE_FAILED'},503);
