@@ -68,6 +68,56 @@ export default {
     }
 
 
+
+    if (url.pathname === '/api/worker/questions' && request.method === 'GET') {
+      if (serviceUnavailable(env)) return json({ error: 'Service unavailable' }, 503);
+      try {
+        const users = new D1UserRepository(env.DB);
+        const versions = new D1AuthVersionReader(env.DB);
+        const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
+        if (!auth.ok) return json({ error: auth.error }, auth.status);
+        const grade = url.searchParams.get('grade') || '';
+        const subjectId = url.searchParams.get('subjectId') || '';
+        const unitId = url.searchParams.get('unitId') || '';
+        const type = url.searchParams.get('type') || '';
+        const difficulty = url.searchParams.get('difficulty') || '';
+        const search = (url.searchParams.get('search') || '').trim().toLocaleLowerCase();
+        const sourceCode = url.searchParams.get('sourceCode') || '';
+        const educationalLevel = url.searchParams.get('educationalLevel') || '';
+        const grammarCategory = url.searchParams.get('grammarCategory') || '';
+        const result = await env.DB.prepare(
+          'SELECT record_json FROM questions WHERE owner_id = ? ORDER BY created_at DESC'
+        ).bind(auth.user.id).all<{ record_json: string }>();
+        if (!result.success) return json({ error: 'Question bank unavailable' }, 503);
+        const assignedGrades = Array.isArray(auth.user.assignedGrades) ? auth.user.assignedGrades.map(String) : [];
+        const assignedSubjects = Array.isArray(auth.user.assignedSubjects) ? auth.user.assignedSubjects.map(String) : [];
+        const unrestricted = ['PlatformOwner', 'Administrator', 'SchoolAdmin'].includes(auth.user.role) ||
+          assignedGrades.includes('all') || assignedSubjects.includes('all');
+        const list = (result.results || []).flatMap((row) => {
+          let question: Record<string, unknown>;
+          try { question = JSON.parse(row.record_json) as Record<string, unknown>; } catch { return []; }
+          if (typeof question.id !== 'string' || typeof question.grade !== 'string') return [];
+          const qSubject = typeof question.subjectId === 'string' ? question.subjectId : 'subj-en';
+          if (!unrestricted && (!assignedGrades.includes(question.grade) || !assignedSubjects.includes(qSubject))) return [];
+          if (grade && question.grade !== grade) return [];
+          if (subjectId && qSubject !== subjectId) return [];
+          if (unitId && question.unitId !== unitId) return [];
+          if (type && question.type !== type) return [];
+          if (difficulty && question.difficulty !== difficulty) return [];
+          if (sourceCode && question.sourceCode !== sourceCode) return [];
+          if (educationalLevel && question.educationalLevel !== educationalLevel) return [];
+          if (grammarCategory && question.grammarCategory !== grammarCategory) return [];
+          if (search && ![question.questionText, question.instructions, question.modelAnswer]
+            .some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(search))) return [];
+          return [question];
+        });
+        return json(list);
+      } catch (error) {
+        console.error('Worker question bank read failed', error);
+        return json({ error: 'Question bank unavailable' }, 500);
+      }
+    }
+
     if (url.pathname === '/api/worker/catalog/subjects' && request.method === 'GET') {
       if (!env.DB) return json({ error: 'Catalog unavailable' }, 503);
       try {
