@@ -88,7 +88,8 @@ function canEditQuestion(user: Record<string, unknown>, question: Record<string,
 
 export default {
   async scheduled(_event: unknown, env: Env): Promise<void> {
-    if (!env.DB || !env.INITIAL_OWNER_PASSWORD || env.INITIAL_OWNER_PASSWORD.length < 16) return;
+    if (!env.DB || !env.INITIAL_OWNER_PASSWORD || env.INITIAL_OWNER_PASSWORD.length < 16) { console.warn('Initial owner bootstrap is not configured'); return; }
+    console.log('Scheduled first-owner bootstrap started');
     const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM app_users').first<{ total: number }>();
     if (Number(count?.total || 0) !== 0) return;
     const now = new Date().toISOString();
@@ -99,10 +100,11 @@ export default {
       assignedSubjects: ['all'], assignedGrades: ['all'],
       delegatedPermissions: { canManageTeachers: true, canManageSubjects: true, canManageIdentity: true, canManageCurricula: true },
       school: 'مدرسة قفلة للتعليم الأساسي', createdAt: now,
-      passwordHash: await bcrypt.hash(env.INITIAL_OWNER_PASSWORD, 12), authVersion: 0,
+      passwordHash: await bcrypt.hash(env.INITIAL_OWNER_PASSWORD, 8), authVersion: 0,
     };
-    await env.DB.prepare('INSERT INTO app_users (id,username,role,status,record_json,created_at,updated_at) SELECT ?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM app_users)=0')
+    const inserted = await env.DB.prepare('INSERT INTO app_users (id,username,role,status,record_json,created_at,updated_at) SELECT ?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM app_users)=0')
       .bind(id, username, 'PlatformOwner', 'ACTIVE', JSON.stringify(user), now, now).run();
+    console.log('Scheduled first-owner bootstrap finished', inserted.meta?.changes || 0);
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {
