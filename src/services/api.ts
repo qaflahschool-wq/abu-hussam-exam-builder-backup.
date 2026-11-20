@@ -277,7 +277,7 @@ class ApiService {
 
   // Dashboard Stats
   async getDashboardStats(signal?: AbortSignal): Promise<any> {
-    return this.request('/api/system/stats', { signal });
+    return this.request('/api/worker/system/stats', { signal });
   }
 
   // Curricula
@@ -310,7 +310,7 @@ class ApiService {
   }
 
   async resetCurricula(): Promise<{ success: boolean; message: string }> {
-    return this.request('/api/curricula/reset', {
+    return this.request('/api/worker/curricula/reset', {
       method: 'POST',
     });
   }
