@@ -3,6 +3,7 @@ import { D1UserRepository } from './server/cloudflare/d1UserRepository.js';
 import { WorkerAuthService } from './server/cloudflare/workerAuthService.js';
 import { authenticateWorkerRequest } from './server/cloudflare/workerAuthGuard.js';
 import { QuestionImageStorage, type R2Bucket } from './server/cloudflare/questionImageStorage.js';
+import { hasValidExamImagePayload } from './server/examImageValidation.js';
 
 interface Env {
   DB: D1Database;
@@ -320,6 +321,125 @@ export default {
       return json({ status: 'ok', runtime: 'cloudflare-workers', timestamp: new Date().toISOString() });
     }
 
+
+
+    const examPrefix = '/api/worker/exams/';
+    const examTail = url.pathname.startsWith(examPrefix) ? url.pathname.slice(examPrefix.length) : '';
+    const examParts = examTail.split('/');
+    const examId = /^[A-Za-z0-9_-]{1,128}$/.test(examParts[0] || '') ? examParts[0] : '';
+    const examAction = examParts.length === 2 ? examParts[1] : '';
+    const examCollection = url.pathname === '/api/worker/exams';
+    if ((examCollection && ['GET','POST'].includes(request.method)) ||
+        (examId && ((examParts.length === 1 && ['GET','PUT','DELETE'].includes(request.method)) ||
+        (examParts.length === 2 && request.method === 'POST' && ['clone','approve'].includes(examAction))))) {
+      if (serviceUnavailable(env)) return json({ error: 'Service unavailable' }, 503);
+      try {
+        const users = new D1UserRepository(env.DB);
+        const versions = new D1AuthVersionReader(env.DB);
+        const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
+        if (!auth.ok) return json({ error: auth.error }, auth.status);
+        const actor = auth.user as Record<string, unknown>;
+        const role = String(actor.role || '');
+        const grades = Array.isArray(actor.assignedGrades) ? actor.assignedGrades.map(String) : [];
+        const subjects = Array.isArray(actor.assignedSubjects) ? actor.assignedSubjects.map(String) : [];
+        const admin = ['PlatformOwner','Administrator','SchoolAdmin'].includes(role);
+        const inScope = (e: Record<string, unknown>) => admin ||
+          ((grades.includes('all') || grades.includes(String(e.grade || ''))) &&
+           (subjects.includes('all') || subjects.includes(String(e.subjectId || 'subj-en'))));
+        const allowed = (e: Record<string, unknown>, need: 'view'|'edit') => {
+          if (e.ownerId === actor.id || e.createdBy === actor.id) return true;
+          const shares = Array.isArray(e.sharedWith) ? e.sharedWith : [];
+          return shares.some(x => !!x && typeof x === 'object' &&
+            (x as Record<string,unknown>).userId === actor.id &&
+            ((x as Record<string,unknown>).permission === 'edit' ||
+             (need === 'view' && (x as Record<string,unknown>).permission === 'view'));
+        };
+        const parse = (s: string): Record<string,unknown>|null => {
+          try { const v: unknown = JSON.parse(s); return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string,unknown> : null; }
+          catch { return null; }
+        };
+        const read = async (id: string) => {
+          const r = await env.DB.prepare('SELECT record_json FROM exams WHERE id = ? LIMIT 1').bind(id).first<{record_json:string}>();
+          return r ? parse(r.record_json) : null;
+        };
+        const save = async (e: Record<string,unknown>) => {
+          const createdAt = typeof e.createdAt === 'string' ? e.createdAt : new Date().toISOString();
+          const updatedAt = new Date().toISOString();
+          const v = { ...e, createdAt, updatedAt };
+          const r = await env.DB.prepare(
+            'INSERT INTO exams (id, owner_id, subject_id, grade, status, record_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET owner_id=excluded.owner_id, subject_id=excluded.subject_id, grade=excluded.grade, status=excluded.status, record_json=excluded.record_json, updated_at=excluded.updated_at'
+          ).bind(String(v.id), String(v.ownerId || v.createdBy || actor.id), String(v.subjectId || 'subj-en'),
+            String(v.grade || ''), String(v.status || 'Draft'), JSON.stringify(v), createdAt, updatedAt).run();
+          if (!r.success) throw new Error('D1 exam save failed');
+          return v;
+        };
+        if (examCollection && request.method === 'GET') {
+          const r = await env.DB.prepare('SELECT record_json FROM exams ORDER BY created_at DESC').all<{record_json:string}>();
+          if (!r.success) return json({error:'Exam workspace unavailable'},503);
+          return json((r.results||[]).flatMap(row => { const e=parse(row.record_json); return e && inScope(e) && allowed(e,'view') ? [e] : []; }));
+        }
+        if (examCollection && request.method === 'POST') {
+          if (Number(request.headers.get('Content-Length')||0)>10_000_000) return json({error:'Exam payload is too large'},413);
+          const body: unknown = await request.json().catch(()=>null);
+          if (!body || typeof body!=='object' || Array.isArray(body)) return json({error:'Invalid exam payload'},400);
+          const input=body as Record<string,unknown>;
+          if (!hasValidExamImagePayload(input)) return json({error:'Invalid or oversized exam image payload'},400);
+          if (typeof input.title!=='string'||!input.title.trim()||typeof input.grade!=='string'||!input.grade.trim()||!Array.isArray(input.sections)) return json({error:'Incomplete exam data'},400);
+          if (!inScope(input)) return json({error:'FORBIDDEN_ACADEMIC_SCOPE'},403);
+          if (typeof input.id==='string' && input.id.trim()) {
+            const old=await read(input.id);
+            if (old) {
+              if (!allowed(old,'edit')) return json({error:'FORBIDDEN_EXAM_EDIT'},403);
+              const {ownerId:_o,createdBy:_c,createdByName:_n,sharedWith:_s,id:_i,...patch}=input;
+              return json({success:true,exam:await save({...old,...patch,id:input.id,ownerId:old.ownerId||old.createdBy||actor.id})});
+            }
+          }
+          const now=new Date().toISOString();
+          return json({success:true,exam:await save({...input,id:typeof input.id==='string'?input.id:'exam-'+crypto.randomUUID(),
+            ownerId:actor.id,createdBy:actor.id,createdByName:actor.name,sharingEnabled:false,sharedWith:[],createdAt:now})});
+        }
+        const existing=await read(examId);
+        if (!existing) return json({error:'EXAM_NOT_FOUND'},404);
+        if (!inScope(existing)) return json({error:'FORBIDDEN_ACADEMIC_SCOPE'},403);
+        if (request.method==='GET') return allowed(existing,'view')?json(existing):json({error:'FORBIDDEN_EXAM_VIEW'},403);
+        if (request.method==='DELETE') {
+          if ((existing.ownerId||existing.createdBy)!==actor.id) return json({error:'FORBIDDEN_EXAM_ARCHIVE'},403);
+          const at=new Date().toISOString(), archived={...existing,status:'Archived',archivedAt:at,updatedAt:at};
+          const ins=await env.DB.prepare('INSERT INTO archived_exams (id, owner_id, subject_id, grade, status, record_json, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json,status=excluded.status,archived_at=excluded.archived_at')
+            .bind(examId,String(existing.ownerId||existing.createdBy||actor.id),String(existing.subjectId||'subj-en'),String(existing.grade||''),'Archived',JSON.stringify(archived),at).run();
+          if (!ins.success) return json({error:'EXAM_ARCHIVE_FAILED'},503);
+          const del=await env.DB.prepare('DELETE FROM exams WHERE id=? AND owner_id=?').bind(examId,String(existing.ownerId||existing.createdBy||actor.id)).run();
+          return del.success?json({success:true}):json({error:'EXAM_ARCHIVE_FAILED'},503);
+        }
+        if (request.method==='PUT') {
+          if (!allowed(existing,'edit')) return json({error:'FORBIDDEN_EXAM_EDIT'},403);
+          if (Number(request.headers.get('Content-Length')||0)>10_000_000) return json({error:'Exam payload is too large'},413);
+          const body: unknown=await request.json().catch(()=>null);
+          if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid exam update'},400);
+          const patch=body as Record<string,unknown>;
+          if (!hasValidExamImagePayload(patch)) return json({error:'Invalid or oversized exam image payload'},400);
+          const {ownerId:_o,createdBy:_c,createdByName:_n,sharedWith:_s,id:_i,...safe}=patch;
+          const next={...existing,...safe,id:examId,ownerId:existing.ownerId||existing.createdBy||actor.id,createdBy:existing.createdBy||actor.id};
+          if (!inScope(next)) return json({error:'FORBIDDEN_ACADEMIC_SCOPE'},403);
+          return json({success:true,exam:await save(next)});
+        }
+        if (examAction==='approve' && request.method==='POST') {
+          if (!allowed(existing,'edit')) return json({error:'FORBIDDEN_EXAM_EDIT'},403);
+          return json({success:true,exam:await save({...existing,status:'Approved'})});
+        }
+        if (examAction==='clone' && request.method==='POST') {
+          if (!allowed(existing,'view')) return json({error:'FORBIDDEN_EXAM_VIEW'},403);
+          const now=new Date().toISOString();
+          const clone=await save({...existing,id:'exam-'+crypto.randomUUID(),code:String(existing.code||'EXAM')+'-COPY',
+            title:String(existing.title||'Exam')+' (Copy)',titleAr:String(existing.titleAr||existing.title||'اختبار')+' (نسخة جديدة)',
+            status:'Draft',ownerId:actor.id,createdBy:actor.id,createdByName:actor.name,sharingEnabled:false,sharedWith:[],createdAt:now});
+          return json({success:true,exam:clone});
+        }
+      } catch (error) {
+        console.error('Worker exam request failed',error);
+        return json({error:'Exam operation failed'},500);
+      }
+    }
 
     const pdfRoute = url.pathname.match(/^\/api\/worker\/exams\/([A-Za-z0-9_-]{1,128})\/export-pdf$/);
     if (pdfRoute && request.method === 'POST') {
