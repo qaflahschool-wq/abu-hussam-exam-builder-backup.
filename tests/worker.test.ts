@@ -385,3 +385,51 @@ test('Worker PDF export requires an authenticated session and uses Browser Run',
   );
   assert.equal(denied.status, 401);
 });
+
+test('Worker question bank returns only the authenticated owner and assigned academic scope', async () => {
+  const scopedUser = {
+    ...user,
+    assignedGrades: ['Grade 7'],
+    assignedSubjects: ['subj-en'],
+  };
+  const records = [
+    { id: 'q-owned', ownerId: scopedUser.id, grade: 'Grade 7', subjectId: 'subj-en', unitId: 'u1', type: 'Multiple Choice', difficulty: 'Easy', questionText: 'Hello', modelAnswer: 'Hi', createdAt: '2026-11-20T08:00:00.000Z' },
+    { id: 'q-other-grade', ownerId: scopedUser.id, grade: 'Grade 8', subjectId: 'subj-en', questionText: 'Hidden grade', modelAnswer: 'x' },
+    { id: 'q-other-subject', ownerId: scopedUser.id, grade: 'Grade 7', subjectId: 'subj-ar', questionText: 'Hidden subject', modelAnswer: 'x' },
+  ];
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+              if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(scopedUser) } as T;
+              return null;
+            },
+            async all<T>() {
+              if (sql.includes('FROM questions WHERE owner_id = ?')) {
+                assert.equal(values[0], scopedUser.id);
+                return { success: true, results: records.map((record) => ({ record_json: JSON.stringify(record) })) as T[] };
+              }
+              return { success: true, results: [] as T[] };
+            },
+            async run() { return { success: true, meta: { changes: 1 } }; },
+          };
+        },
+      };
+    },
+  };
+  const token = await signWorkerAuthToken({ id: scopedUser.id, role: scopedUser.role }, SECRET, {
+    getAuthVersion: async () => 0,
+  }, 3600);
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/questions?grade=Grade%207&subjectId=subj-en', {
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    { DB: db as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 200);
+  const questions = await response.json() as Array<{ id: string }>;
+  assert.deepEqual(questions.map((item) => item.id), ['q-owned']);
+});
