@@ -641,127 +641,6 @@ export default {
 
 
 
-    // Owner-isolated reusable layout templates and analyzed source documents.
-    if (url.pathname==='/api/worker/layout-templates' && request.method==='GET') {
-      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
-      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
-      if (!auth.ok) return json({error:auth.error},auth.status);
-      const r=await env.DB.prepare('SELECT record_json FROM layout_templates WHERE owner_id=? ORDER BY created_at DESC')
-        .bind(String(auth.user.id)).all<{record_json:string}>();
-      return r.success?json((r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json)]}catch{return[]}})):json({error:'Layout templates unavailable'},503);
-    }
-    if (url.pathname==='/api/worker/layout-templates' && request.method==='POST') {
-      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
-      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
-      if (!auth.ok) return json({error:auth.error},auth.status);
-      const body:unknown=await request.json().catch(()=>null);
-      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid layout template'},400);
-      const input=body as Record<string,unknown>;
-      if (typeof input.name!=='string'||!input.name.trim()||typeof input.nameAr!=='string'||!input.nameAr.trim()||!input.layoutConfig||typeof input.layoutConfig!=='object') return json({error:'Template name and layout configuration are required'},400);
-      const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'layout-'+crypto.randomUUID();
-      const template={...input,id,ownerId:String(auth.user.id),createdAt:new Date().toISOString()};
-      const saved=await env.DB.prepare('INSERT INTO layout_templates (id,owner_id,record_json,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json')
-        .bind(id,String(auth.user.id),JSON.stringify(template),String(template.createdAt)).run();
-      return saved.success?json({success:true,template}):json({error:'LAYOUT_TEMPLATE_SAVE_FAILED'},503);
-    }
-    const layoutIdMatch=url.pathname.match(/^\/api\/worker\/layout-templates\/([A-Za-z0-9_-]{1,128})$/);
-    if (layoutIdMatch && request.method==='DELETE') {
-      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
-      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
-      if (!auth.ok) return json({error:auth.error},auth.status);
-      const removed=await env.DB.prepare('DELETE FROM layout_templates WHERE id=? AND owner_id=?').bind(layoutIdMatch[1],String(auth.user.id)).run();
-      return removed.success?json({success:true}):json({error:'LAYOUT_TEMPLATE_DELETE_FAILED'},503);
-    }
-
-    if (url.pathname==='/api/worker/documents' && request.method==='GET') {
-      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
-      const check=await aiAccess(request);
-      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
-      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
-      const r=await env.DB.prepare('SELECT record_json FROM analyzed_documents WHERE owner_id=? ORDER BY created_at DESC')
-        .bind(check.userId).all<{record_json:string}>();
-      return r.success?json((r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json)]}catch{return[]}})):json({error:'Documents unavailable'},503);
-    }
-    if (url.pathname==='/api/worker/documents' && request.method==='POST') {
-      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
-      const check=await aiAccess(request);
-      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
-      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
-      const length=Number(request.headers.get('Content-Length')||0);
-      if (length>10_000_000) return json({error:'Document is too large'},413);
-      const body:unknown=await request.json().catch(()=>null);
-      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid document'},400);
-      const input=body as Record<string,unknown>;
-      if (typeof input.title!=='string'||!input.title.trim()) return json({error:'Document title is required'},400);
-      const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'doc-'+crypto.randomUUID();
-      const document={...input,id,ownerId:check.userId,createdAt:new Date().toISOString()};
-      const saved=await env.DB.prepare('INSERT INTO analyzed_documents (id,owner_id,record_json,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json')
-        .bind(id,check.userId,JSON.stringify(document),String(document.createdAt)).run();
-      return saved.success?json({success:true,document}):json({error:'DOCUMENT_SAVE_FAILED'},503);
-    }
-    const documentIdMatch=url.pathname.match(/^\/api\/worker\/documents\/([A-Za-z0-9_-]{1,128})$/);
-    if (documentIdMatch && ['GET','DELETE'].includes(request.method)) {
-      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
-      const check=await aiAccess(request);
-      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
-      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
-      if (request.method==='GET') {
-        const row=await env.DB.prepare('SELECT record_json FROM analyzed_documents WHERE id=? AND owner_id=? LIMIT 1')
-          .bind(documentIdMatch[1],check.userId).first<{record_json:string}>();
-        return row?json(JSON.parse(row.record_json)):json({error:'DOCUMENT_NOT_FOUND'},404);
-      }
-      const removed=await env.DB.prepare('DELETE FROM analyzed_documents WHERE id=? AND owner_id=?')
-        .bind(documentIdMatch[1],check.userId).run();
-      return removed.success?json({success:true}):json({error:'DOCUMENT_DELETE_FAILED'},503);
-    }
-
-    const backupTables=['app_users','registration_requests','notifications','subjects','school_settings','curricula','questions','exams','archived_exams','layout_templates','analyzed_documents','ai_settings','ai_usage_logs','audit_logs','question_images','auth_rate_limits','app_migrations'];
-    const isPlatformOwner=async (request:Request) => {
-      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
-      if (!auth.ok) return {auth,ownerId:'',isOwner:false};
-      return {auth,ownerId:String(auth.user.id),isOwner:String(auth.user.role)==='PlatformOwner'};
-    };
-    const makeBackup=async (ownerId:string) => {
-      if (!env.QUESTION_IMAGES) throw new Error('Private R2 bucket binding is missing');
-      const tables:Record<string,unknown[]>={};
-      for (const table of backupTables) {
-        const result=await env.DB.prepare('SELECT * FROM '+table).all<Record<string,unknown>>();
-        if (!result.success) throw new Error('Could not read table '+table);
-        tables[table]=result.results||[];
-      }
-      const createdAt=new Date().toISOString(),id='backup-'+crypto.randomUUID();
-      const snapshot={format:'ABU_HUSSAM_D1_BACKUP_V1',createdAt,tables};
-      const plain=new TextEncoder().encode(JSON.stringify(snapshot));
-      const iv=crypto.getRandomValues(new Uint8Array(12));
-      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(env.SESSION_SECRET));
-      const key=await crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['encrypt','decrypt']);
-      const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,plain));
-      const ivHex=Array.from(iv,x=>x.toString(16).padStart(2,'0')).join('');
-      const filename='abu-hussam-backup-'+createdAt.replace(/[:.]/g,'-')+'-'+id.slice(-8)+'.json.enc';
-      const objectKey='backups/'+id+'.bin';
-      await env.QUESTION_IMAGES.put(objectKey,encrypted,{httpMetadata:{contentType:'application/octet-stream'},customMetadata:{backupId:id,createdBy:ownerId}});
-      const record={id,filename,objectKey,byteSize:encrypted.byteLength,ivHex,createdBy:ownerId,createdAt};
-      const saved=await env.DB.prepare('INSERT INTO backup_metadata (id,filename,object_key,byte_size,iv_hex,created_by,created_at,record_json) VALUES (?,?,?,?,?,?,?,?)')
-        .bind(id,filename,objectKey,encrypted.byteLength,ivHex,ownerId,createdAt,JSON.stringify(record)).run();
-      if (!saved.success) { await env.QUESTION_IMAGES.delete(objectKey).catch(()=>undefined); throw new Error('Backup metadata could not be stored'); }
-      return record;
-    };
-    const readBackup=async (record:Record<string,unknown>) => {
-      if (!env.QUESTION_IMAGES) throw new Error('Private R2 bucket binding is missing');
-      const object=await env.QUESTION_IMAGES.get(String(record.object_key));
-      if (!object) throw new Error('Backup object is missing from R2');
-      const encrypted=await object.arrayBuffer();
-      const ivText=String(record.iv_hex||'');
-      if (!/^[a-f0-9]{24}$/.test(ivText)) throw new Error('Backup encryption metadata is invalid');
-      const iv=new Uint8Array(ivText.match(/.{2}/g)!.map(x=>parseInt(x,16)));
-      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(env.SESSION_SECRET));
-      const key=await crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['decrypt']);
-      const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,encrypted);
-      const parsed:unknown=JSON.parse(new TextDecoder().decode(plain));
-      if (!parsed||typeof parsed!=='object'||(parsed as Record<string,unknown>).format!=='ABU_HUSSAM_D1_BACKUP_V1') throw new Error('Backup format is invalid');
-      return plain;
-    };
-
     const aiModels=[
       {id:'gemini-3.8-flash',name:'Gemini 3.8 Flash (الموديل الموصى به)',isFreeTier:true,description:'سريع لتوليد وفحص الاختبارات المدرسية.'},
       {id:'gemini-3.1-flash-lite',name:'Gemini 3.1 Flash Lite (الاحتياطي السريع)',isFreeTier:true,description:'خيار احتياطي سريع واقتصادي.'}
@@ -899,6 +778,127 @@ export default {
         return json({error:'Question generation failed'},502);
       }
     }
+
+    // Owner-isolated reusable layout templates and analyzed source documents.
+    if (url.pathname==='/api/worker/layout-templates' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const r=await env.DB.prepare('SELECT record_json FROM layout_templates WHERE owner_id=? ORDER BY created_at DESC')
+        .bind(String(auth.user.id)).all<{record_json:string}>();
+      return r.success?json((r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json)]}catch{return[]}})):json({error:'Layout templates unavailable'},503);
+    }
+    if (url.pathname==='/api/worker/layout-templates' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid layout template'},400);
+      const input=body as Record<string,unknown>;
+      if (typeof input.name!=='string'||!input.name.trim()||typeof input.nameAr!=='string'||!input.nameAr.trim()||!input.layoutConfig||typeof input.layoutConfig!=='object') return json({error:'Template name and layout configuration are required'},400);
+      const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'layout-'+crypto.randomUUID();
+      const template={...input,id,ownerId:String(auth.user.id),createdAt:new Date().toISOString()};
+      const saved=await env.DB.prepare('INSERT INTO layout_templates (id,owner_id,record_json,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json')
+        .bind(id,String(auth.user.id),JSON.stringify(template),String(template.createdAt)).run();
+      return saved.success?json({success:true,template}):json({error:'LAYOUT_TEMPLATE_SAVE_FAILED'},503);
+    }
+    const layoutIdMatch=url.pathname.match(/^\/api\/worker\/layout-templates\/([A-Za-z0-9_-]{1,128})$/);
+    if (layoutIdMatch && request.method==='DELETE') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const removed=await env.DB.prepare('DELETE FROM layout_templates WHERE id=? AND owner_id=?').bind(layoutIdMatch[1],String(auth.user.id)).run();
+      return removed.success?json({success:true}):json({error:'LAYOUT_TEMPLATE_DELETE_FAILED'},503);
+    }
+
+    if (url.pathname==='/api/worker/documents' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      const r=await env.DB.prepare('SELECT record_json FROM analyzed_documents WHERE owner_id=? ORDER BY created_at DESC')
+        .bind(check.userId).all<{record_json:string}>();
+      return r.success?json((r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json)]}catch{return[]}})):json({error:'Documents unavailable'},503);
+    }
+    if (url.pathname==='/api/worker/documents' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      const length=Number(request.headers.get('Content-Length')||0);
+      if (length>10_000_000) return json({error:'Document is too large'},413);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid document'},400);
+      const input=body as Record<string,unknown>;
+      if (typeof input.title!=='string'||!input.title.trim()) return json({error:'Document title is required'},400);
+      const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'doc-'+crypto.randomUUID();
+      const document={...input,id,ownerId:check.userId,createdAt:new Date().toISOString()};
+      const saved=await env.DB.prepare('INSERT INTO analyzed_documents (id,owner_id,record_json,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json')
+        .bind(id,check.userId,JSON.stringify(document),String(document.createdAt)).run();
+      return saved.success?json({success:true,document}):json({error:'DOCUMENT_SAVE_FAILED'},503);
+    }
+    const documentIdMatch=url.pathname.match(/^\/api\/worker\/documents\/([A-Za-z0-9_-]{1,128})$/);
+    if (documentIdMatch && ['GET','DELETE'].includes(request.method)) {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      if (request.method==='GET') {
+        const row=await env.DB.prepare('SELECT record_json FROM analyzed_documents WHERE id=? AND owner_id=? LIMIT 1')
+          .bind(documentIdMatch[1],check.userId).first<{record_json:string}>();
+        return row?json(JSON.parse(row.record_json)):json({error:'DOCUMENT_NOT_FOUND'},404);
+      }
+      const removed=await env.DB.prepare('DELETE FROM analyzed_documents WHERE id=? AND owner_id=?')
+        .bind(documentIdMatch[1],check.userId).run();
+      return removed.success?json({success:true}):json({error:'DOCUMENT_DELETE_FAILED'},503);
+    }
+
+    const backupTables=['app_users','registration_requests','notifications','subjects','school_settings','curricula','questions','exams','archived_exams','layout_templates','analyzed_documents','ai_settings','ai_usage_logs','audit_logs','question_images','auth_rate_limits','app_migrations'];
+    const isPlatformOwner=async (request:Request) => {
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return {auth,ownerId:'',isOwner:false};
+      return {auth,ownerId:String(auth.user.id),isOwner:String(auth.user.role)==='PlatformOwner'};
+    };
+    const makeBackup=async (ownerId:string) => {
+      if (!env.QUESTION_IMAGES) throw new Error('Private R2 bucket binding is missing');
+      const tables:Record<string,unknown[]>={};
+      for (const table of backupTables) {
+        const result=await env.DB.prepare('SELECT * FROM '+table).all<Record<string,unknown>>();
+        if (!result.success) throw new Error('Could not read table '+table);
+        tables[table]=result.results||[];
+      }
+      const createdAt=new Date().toISOString(),id='backup-'+crypto.randomUUID();
+      const snapshot={format:'ABU_HUSSAM_D1_BACKUP_V1',createdAt,tables};
+      const plain=new TextEncoder().encode(JSON.stringify(snapshot));
+      const iv=crypto.getRandomValues(new Uint8Array(12));
+      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(env.SESSION_SECRET));
+      const key=await crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['encrypt','decrypt']);
+      const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,plain));
+      const ivHex=Array.from(iv,x=>x.toString(16).padStart(2,'0')).join('');
+      const filename='abu-hussam-backup-'+createdAt.replace(/[:.]/g,'-')+'-'+id.slice(-8)+'.json.enc';
+      const objectKey='backups/'+id+'.bin';
+      await env.QUESTION_IMAGES.put(objectKey,encrypted,{httpMetadata:{contentType:'application/octet-stream'},customMetadata:{backupId:id,createdBy:ownerId}});
+      const record={id,filename,objectKey,byteSize:encrypted.byteLength,ivHex,createdBy:ownerId,createdAt};
+      const saved=await env.DB.prepare('INSERT INTO backup_metadata (id,filename,object_key,byte_size,iv_hex,created_by,created_at,record_json) VALUES (?,?,?,?,?,?,?,?)')
+        .bind(id,filename,objectKey,encrypted.byteLength,ivHex,ownerId,createdAt,JSON.stringify(record)).run();
+      if (!saved.success) { await env.QUESTION_IMAGES.delete(objectKey).catch(()=>undefined); throw new Error('Backup metadata could not be stored'); }
+      return record;
+    };
+    const readBackup=async (record:Record<string,unknown>) => {
+      if (!env.QUESTION_IMAGES) throw new Error('Private R2 bucket binding is missing');
+      const object=await env.QUESTION_IMAGES.get(String(record.object_key));
+      if (!object) throw new Error('Backup object is missing from R2');
+      const encrypted=await object.arrayBuffer();
+      const ivText=String(record.iv_hex||'');
+      if (!/^[a-f0-9]{24}$/.test(ivText)) throw new Error('Backup encryption metadata is invalid');
+      const iv=new Uint8Array(ivText.match(/.{2}/g)!.map(x=>parseInt(x,16)));
+      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(env.SESSION_SECRET));
+      const key=await crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['decrypt']);
+      const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,encrypted);
+      const parsed:unknown=JSON.parse(new TextDecoder().decode(plain));
+      if (!parsed||typeof parsed!=='object'||(parsed as Record<string,unknown>).format!=='ABU_HUSSAM_D1_BACKUP_V1') throw new Error('Backup format is invalid');
+      return plain;
+    };
 
     if (url.pathname==='/api/worker/system/storage-status' && request.method==='GET') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
