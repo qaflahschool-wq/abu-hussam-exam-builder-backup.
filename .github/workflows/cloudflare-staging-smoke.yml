@@ -1,0 +1,32 @@
+name: Cloudflare staging smoke test
+
+on:
+  push:
+    branches:
+      - cloudflare/staging-foundation-2026-11-20
+    paths:
+      - '.github/workflows/cloudflare-staging-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check deployed Worker health
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/api/worker/health \
+            -o /tmp/health.json
+          cat /tmp/health.json
+          node -e "const h=require('/tmp/health.json'); if(h.status!=='ok') process.exit(1);"
+      - name: Check deployed frontend proxy
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/ \
+            -o /tmp/index.html
+          grep -q '<div id="root"' /tmp/index.html
+          echo "Frontend HTML is reachable ($(wc -c </tmp/index.html) bytes)"
