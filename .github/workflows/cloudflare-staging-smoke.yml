@@ -70,3 +70,13 @@ jobs:
             fi
             echo "PASS $path -> HTTP $status"
           done
+
+      - name: Verify public login-page data and completed bootstrap
+        run: |
+          base="https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev"
+          curl --fail --silent --show-error --max-time 20 "$base/api/worker/catalog/subjects?active=true" -o /tmp/subjects.json
+          node -e "const x=require('/tmp/subjects.json'); if(!Array.isArray(x)||x.length<1) process.exit(1); console.log('Active subjects:',x.length);"
+          curl --fail --silent --show-error --max-time 20 "$base/api/worker/school/identity" -o /tmp/identity.json
+          node -e "const x=require('/tmp/identity.json'); if(x.schoolNameAr!=='مدرسة قفلة للتعليم الأساسي') process.exit(1); console.log('School identity:',x.schoolNameAr);"
+          curl --fail --silent --show-error --max-time 20 "$base/api/worker/bootstrap/status" -o /tmp/bootstrap.json
+          node -e "const x=require('/tmp/bootstrap.json'); if(x.needsSetup!==false) process.exit(1); console.log('Owner bootstrap complete');"
