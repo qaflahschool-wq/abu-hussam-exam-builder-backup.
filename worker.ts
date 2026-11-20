@@ -535,7 +535,7 @@ export default {
           .bind(restoreId,auth.user.id).first<{record_json:string}>();
         if (!row) return json({error:'ARCHIVED_EXAM_NOT_FOUND'},404);
         const exam=JSON.parse(row.record_json) as Record<string,unknown>;
-        const restored={...exam,status:'Draft',archivedAt:null,updatedAt:new Date().toISOString()};
+        const restored: Record<string,unknown>={...exam,status:'Draft',archivedAt:null,updatedAt:new Date().toISOString()};
         const ins=await env.DB.prepare('INSERT INTO exams (id,owner_id,subject_id,grade,status,record_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET owner_id=excluded.owner_id,subject_id=excluded.subject_id,grade=excluded.grade,status=excluded.status,record_json=excluded.record_json,updated_at=excluded.updated_at')
           .bind(restoreId,auth.user.id,String(restored.subjectId||'subj-en'),String(restored.grade||''),'Draft',JSON.stringify(restored),String(restored.createdAt||new Date().toISOString()),String(restored.updatedAt)).run();
         if (!ins.success) return json({error:'EXAM_RESTORE_FAILED'},503);
