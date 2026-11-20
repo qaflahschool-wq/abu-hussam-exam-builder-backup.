@@ -204,6 +204,13 @@ class ApiService {
     });
   }
 
+  async recoverOwner(recoveryToken: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    return this.request('/api/worker/auth/recover-owner', {
+      method: 'POST',
+      body: JSON.stringify({ recoveryToken, newPassword }),
+    });
+  }
+
   async resetPassword(userId: string, newPassword: string): Promise<{ success: boolean; message: string }> {
     return this.request('/api/worker/auth/reset-password', {
       method: 'POST',
