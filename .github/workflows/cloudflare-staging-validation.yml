@@ -51,6 +51,9 @@ jobs:
       - name: Package Worker and static assets
         run: node scripts/export-staging-bundle.mjs
 
+      - name: Remove build dependencies before creating the artifact branch
+        run: rm -rf node_modules .wrangler dist server.js
+
       - name: Publish immutable staging build artifact branch
         run: |
           git config user.name "github-actions[bot]"
