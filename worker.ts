@@ -12,6 +12,7 @@ interface Env {
   DB: D1Database;
   SESSION_SECRET: string;
   BOOTSTRAP_TOKEN?: string;
+  OWNER_RECOVERY_TOKEN?: string;
   GEMINI_API_KEY?: string;
   FRONTEND_ORIGIN?: string;
   INITIAL_OWNER_PASSWORD?: string;
@@ -1445,6 +1446,41 @@ export default {
         return new Response('\uFEFF'+csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="qaflah-audit-log.csv"','Cache-Control':'private, no-store'}});
       }
       return new Response(JSON.stringify({exportedAt:new Date().toISOString(),logs},null,2),{headers:{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="qaflah-audit-log.json"','Cache-Control':'private, no-store'}});
+    }
+
+    if (url.pathname==='/api/worker/auth/recover-owner' && request.method==='POST') {
+      if (serviceUnavailable(env) || typeof env.OWNER_RECOVERY_TOKEN !== 'string' || env.OWNER_RECOVERY_TOKEN.length < 32) {
+        return json({error:'Owner recovery is not configured'},503);
+      }
+      try {
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid recovery request'},400);
+        const input=body as Record<string,unknown>;
+        const supplied=typeof input.recoveryToken==='string'?input.recoveryToken:'';
+        const password=typeof input.newPassword==='string'?input.newPassword:'';
+        if (password.length<12||password.length>128) return json({error:'كلمة المرور يجب أن تكون بين 12 و128 حرفاً'},400);
+        const expectedBytes=new TextEncoder().encode(env.OWNER_RECOVERY_TOKEN);
+        const suppliedBytes=new TextEncoder().encode(supplied);
+        const expectedHash=new Uint8Array(await crypto.subtle.digest('SHA-256',expectedBytes));
+        const suppliedHash=new Uint8Array(await crypto.subtle.digest('SHA-256',suppliedBytes));
+        let mismatch=expectedHash.length^suppliedHash.length;
+        for(let i=0;i<expectedHash.length;i++) mismatch|=expectedHash[i]^(suppliedHash[i]||0);
+        if(mismatch!==0) return json({error:'رمز الاستعادة غير صحيح'},403);
+        const ownerRows=await env.DB.prepare("SELECT id FROM app_users WHERE username='abuhussam' COLLATE NOCASE AND role='PlatformOwner' LIMIT 2").all<{id:string}>();
+        if(!ownerRows.success||!ownerRows.results||ownerRows.results.length!==1) return json({error:'OWNER_ACCOUNT_NOT_UNIQUE'},409);
+        const ownerId=ownerRows.results[0].id;
+        const hash=await bcrypt.hash(password,12);
+        const now=Date.now();
+        const results=await env.DB.batch!([
+          env.DB.prepare("UPDATE app_users SET record_json=json_set(record_json,'$.passwordHash',?,'$.authVersion',COALESCE(json_extract(record_json,'$.authVersion'),0)+1,'$.failedLoginAttempts',0,'$.lockedUntil',NULL),updated_at=? WHERE id=? AND NOT EXISTS (SELECT 1 FROM auth_rate_limits WHERE bucket_key='owner-recovery-used')").bind(hash,new Date().toISOString(),ownerId),
+          env.DB.prepare("INSERT OR IGNORE INTO auth_rate_limits (bucket_key,window_started_at,attempts,locked_until) VALUES ('owner-recovery-used',?,1,?)").bind(now,now)
+        ]);
+        if(Number(results[0]?.meta?.changes||0)!==1) return json({error:'OWNER_RECOVERY_ALREADY_USED'},409);
+        return json({success:true,message:'تم تحديث كلمة مرور المالك. يمكنك تسجيل الدخول الآن.'});
+      } catch(error) {
+        console.error('Owner recovery failed',error);
+        return json({error:'OWNER_RECOVERY_FAILED'},500);
+      }
     }
 
     if (url.pathname==='/api/worker/auth/reset-password' && request.method==='POST') {
