@@ -350,7 +350,7 @@ export default {
         const existingCount=await env.DB.prepare('SELECT COUNT(*) AS total FROM curricula').first<{total:number}>();
         if (Number(existingCount?.total||0)===0) {
           for (const seedUnit of DEFAULT_CURRICULA) {
-            const unit={...seedUnit,subjectId:typeof seedUnit.subjectId==='string'?seedUnit.subjectId:'subj-en'};
+            const unit: Record<string,unknown>={...seedUnit,subjectId:typeof seedUnit.subjectId==='string'?seedUnit.subjectId:'subj-en'};
             await env.DB.prepare('INSERT OR IGNORE INTO curricula (id,grade,subject_id,record_json) VALUES (?,?,?,?)')
               .bind(String(unit.id),String(unit.grade),String(unit.subjectId),JSON.stringify(unit)).run();
           }
