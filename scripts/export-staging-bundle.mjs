@@ -41,6 +41,7 @@ async function walk(directory) {
       encoding: textual ? 'utf8' : 'base64',
       size: bytes.byteLength,
       sha256: createHash('sha256').update(bytes).digest('hex'),
+      md5: createHash('md5').update(bytes).digest('hex'),
       contentType,
     });
   }
