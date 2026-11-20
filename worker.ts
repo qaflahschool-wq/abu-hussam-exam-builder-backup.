@@ -640,6 +640,81 @@ export default {
     }
 
 
+
+    // Owner-isolated reusable layout templates and analyzed source documents.
+    if (url.pathname==='/api/worker/layout-templates' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const r=await env.DB.prepare('SELECT record_json FROM layout_templates WHERE owner_id=? ORDER BY created_at DESC')
+        .bind(String(auth.user.id)).all<{record_json:string}>();
+      return r.success?json((r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json)]}catch{return[]}})):json({error:'Layout templates unavailable'},503);
+    }
+    if (url.pathname==='/api/worker/layout-templates' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid layout template'},400);
+      const input=body as Record<string,unknown>;
+      if (typeof input.name!=='string'||!input.name.trim()||typeof input.nameAr!=='string'||!input.nameAr.trim()||!input.layoutConfig||typeof input.layoutConfig!=='object') return json({error:'Template name and layout configuration are required'},400);
+      const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'layout-'+crypto.randomUUID();
+      const template={...input,id,ownerId:String(auth.user.id),createdAt:new Date().toISOString()};
+      const saved=await env.DB.prepare('INSERT INTO layout_templates (id,owner_id,record_json,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json')
+        .bind(id,String(auth.user.id),JSON.stringify(template),String(template.createdAt)).run();
+      return saved.success?json({success:true,template}):json({error:'LAYOUT_TEMPLATE_SAVE_FAILED'},503);
+    }
+    const layoutIdMatch=url.pathname.match(/^\/api\/worker\/layout-templates\/([A-Za-z0-9_-]{1,128})$/);
+    if (layoutIdMatch && request.method==='DELETE') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const removed=await env.DB.prepare('DELETE FROM layout_templates WHERE id=? AND owner_id=?').bind(layoutIdMatch[1],String(auth.user.id)).run();
+      return removed.success?json({success:true}):json({error:'LAYOUT_TEMPLATE_DELETE_FAILED'},503);
+    }
+
+    if (url.pathname==='/api/worker/documents' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      const r=await env.DB.prepare('SELECT record_json FROM analyzed_documents WHERE owner_id=? ORDER BY created_at DESC')
+        .bind(check.userId).all<{record_json:string}>();
+      return r.success?json((r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json)]}catch{return[]}})):json({error:'Documents unavailable'},503);
+    }
+    if (url.pathname==='/api/worker/documents' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      const length=Number(request.headers.get('Content-Length')||0);
+      if (length>10_000_000) return json({error:'Document is too large'},413);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid document'},400);
+      const input=body as Record<string,unknown>;
+      if (typeof input.title!=='string'||!input.title.trim()) return json({error:'Document title is required'},400);
+      const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'doc-'+crypto.randomUUID();
+      const document={...input,id,ownerId:check.userId,createdAt:new Date().toISOString()};
+      const saved=await env.DB.prepare('INSERT INTO analyzed_documents (id,owner_id,record_json,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json')
+        .bind(id,check.userId,JSON.stringify(document),String(document.createdAt)).run();
+      return saved.success?json({success:true,document}):json({error:'DOCUMENT_SAVE_FAILED'},503);
+    }
+    const documentIdMatch=url.pathname.match(/^\/api\/worker\/documents\/([A-Za-z0-9_-]{1,128})$/);
+    if (documentIdMatch && ['GET','DELETE'].includes(request.method)) {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      if (request.method==='GET') {
+        const row=await env.DB.prepare('SELECT record_json FROM analyzed_documents WHERE id=? AND owner_id=? LIMIT 1')
+          .bind(documentIdMatch[1],check.userId).first<{record_json:string}>();
+        return row?json(JSON.parse(row.record_json)):json({error:'DOCUMENT_NOT_FOUND'},404);
+      }
+      const removed=await env.DB.prepare('DELETE FROM analyzed_documents WHERE id=? AND owner_id=?')
+        .bind(documentIdMatch[1],check.userId).run();
+      return removed.success?json({success:true}):json({error:'DOCUMENT_DELETE_FAILED'},503);
+    }
+
     const backupTables=['app_users','registration_requests','notifications','subjects','school_settings','curricula','questions','exams','archived_exams','layout_templates','analyzed_documents','ai_settings','ai_usage_logs','audit_logs','question_images','auth_rate_limits','app_migrations'];
     const isPlatformOwner=async (request:Request) => {
       const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
