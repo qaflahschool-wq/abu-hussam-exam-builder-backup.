@@ -558,14 +558,14 @@ class ApiService {
   }
 
   async generateExamWithAI(params: any): Promise<{ success: boolean; exam: Exam; modelUsed: string; qualityReport: QualityValidationReport }> {
-    return this.request('/api/exams/generate-ai', {
+    return this.request('/api/worker/exams/generate-ai', {
       method: 'POST',
       body: JSON.stringify(params),
     });
   }
 
   async validateExam(sections: any[], totalMarks: number, grade: string): Promise<QualityValidationReport> {
-    return this.request('/api/exams/validate', {
+    return this.request('/api/worker/exams/validate', {
       method: 'POST',
       body: JSON.stringify({ sections, totalMarks, grade }),
     });
