@@ -1278,6 +1278,47 @@ export default {
     }
 
 
+
+    const sha256Hex=async (value:string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))))
+      .map(x=>x.toString(16).padStart(2,'0')).join('');
+    const auditHash=(prevHash:string,entry:Record<string,unknown>)=>[
+      prevHash,String(entry.id||''),String(entry.timestamp||''),String(entry.userId||''),String(entry.action||''),
+      String(entry.category||'ADMIN'),String(entry.severity||'INFO'),String(entry.details||''),String(entry.result||'SUCCESS')
+    ].join('|');
+    const verifyAudit=async (logs:Record<string,unknown>[]) => {
+      const broken:string[]=[];let chained=0,legacy=0;
+      for (const entry of logs) {
+        if (typeof entry.entryHash!=='string'||!entry.entryHash) {legacy++;continue;}
+        chained++;
+        const expected=await sha256Hex(auditHash(String(entry.prevHash||'GENESIS'),entry));
+        if (expected!==entry.entryHash) broken.push(String(entry.id||'unknown'));
+      }
+      return {valid:broken.length===0,chainedCount:chained,legacyCount:legacy,brokenEntryIds:broken};
+    };
+    const examExportLogMatch=url.pathname.match(/^\/api\/worker\/exams\/([A-Za-z0-9_-]{1,128})\/export-log$/);
+    if (examExportLogMatch && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const examId=examExportLogMatch[1];
+      const row=await env.DB.prepare('SELECT record_json FROM exams WHERE id=? LIMIT 1').bind(examId).first<{record_json:string}>();
+      if (!row) return json({error:'EXAM_NOT_FOUND'},404);
+      const exam=JSON.parse(row.record_json) as Record<string,unknown>,actor=auth.user as Record<string,unknown>;
+      const shares=Array.isArray(exam.sharedWith)?exam.sharedWith as Array<Record<string,unknown>>:[];
+      const permitted=(exam.ownerId===actor.id||exam.createdBy===actor.id||shares.some(s=>s.userId===actor.id));
+      if (!permitted) return json({error:'FORBIDDEN_EXAM_EXPORT'},403);
+      const previous=await env.DB.prepare('SELECT entry_hash FROM audit_logs ORDER BY timestamp DESC LIMIT 1').first<{entry_hash:string}>();
+      const prevHash=previous?.entry_hash||'GENESIS',timestamp=new Date().toISOString(),id='audit-'+crypto.randomUUID();
+      const entry:Record<string,unknown>={id,timestamp,userId:String(actor.id),actorName:String(actor.name||actor.username||actor.id),
+        actorRole:String(actor.role||'Unknown'),action:'EXPORT_EXAM_PDF',category:'EXAM',severity:'INFO',
+        details:'Exported exam PDF: '+String(exam.code||exam.title||examId),result:'SUCCESS',examId,prevHash};
+      const entryHash=await sha256Hex(auditHash(prevHash,entry));
+      const complete={...entry,entryHash};
+      const saved=await env.DB.prepare('INSERT INTO audit_logs (id,user_id,timestamp,prev_hash,entry_hash,record_json) VALUES (?,?,?,?,?,?)')
+        .bind(id,String(actor.id),timestamp,prevHash,entryHash,JSON.stringify(complete)).run();
+      return saved.success?json({success:true}):json({error:'EXPORT_LOG_FAILED'},503);
+    }
+
     // Owner lifecycle and control-center operations.
     const ownerUserAction=url.pathname.match(/^\/api\/worker\/owner\/users\/([A-Za-z0-9_-]{1,128})\/(suspend|reactivate)$/);
     if (ownerUserAction && request.method==='POST') {
@@ -1327,7 +1368,7 @@ export default {
           usersOverview:allUsers.map(u=>{const {passwordHash:_hash,authVersion:_version,...safe}=u;return {...safe,examsCount:allExams.filter(e=>(e.ownerId||e.createdBy)===u.id).length}}),
           recentSecurityAlerts:security.slice(0,25),
           recentExamsActivity:allExams.slice(0,15).map(e=>({id:e.id,title:e.title,titleAr:e.titleAr,code:e.code,status:e.status,grade:e.grade,createdAt:e.createdAt,createdByName:e.createdByName})),
-          auditIntegrity:{valid:false,chainedCount:0,legacyCount:audit.length,brokenEntryIds:[]},
+          auditIntegrity:await verifyAudit(audit),
           storageStatus:{database:'D1',r2Configured:Boolean(env.QUESTION_IMAGES)}});
       } catch(e) {console.error('Owner control center failed',e);return json({error:'Control center unavailable'},500);}
     }
@@ -1343,7 +1384,7 @@ export default {
       const logs=(r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json) as Record<string,unknown>]}catch{return[]}})
         .filter(log=>(!category||log.category===category)&&(!severity||log.severity===severity)&&(!userId||log.userId===userId)&&
           (!search||JSON.stringify(log).toLowerCase().includes(search))).slice(0,limit);
-      return json({logs,integrity:{valid:logs.length===0,chainedCount:0,legacyCount:logs.length,brokenEntryIds:[]}});
+      return json({logs,integrity:await verifyAudit(logs)});
     }
     if (url.pathname==='/api/worker/owner/audit-logs/export' && request.method==='GET') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
