@@ -198,14 +198,14 @@ class ApiService {
   }
 
   async switchUser(userId: string): Promise<{ success: boolean; token: string; user: User }> {
-    return this.request('/api/auth/switch-user', {
+    return this.request('/api/worker/auth/switch-user', {
       method: 'POST',
       body: JSON.stringify({ userId }),
     });
   }
 
   async resetPassword(userId: string, newPassword: string): Promise<{ success: boolean; message: string }> {
-    return this.request('/api/auth/reset-password', {
+    return this.request('/api/worker/auth/reset-password', {
       method: 'POST',
       body: JSON.stringify({ userId, newPassword }),
     });
@@ -673,20 +673,20 @@ class ApiService {
   }
 
   async suspendUser(userId: string, reason: string): Promise<{ success: boolean; user: User }> {
-    return this.request(`/api/owner/users/${userId}/suspend`, {
+    return this.request(`/api/worker/owner/users/${encodeURIComponent(userId)}/suspend`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
   }
 
   async reactivateUser(userId: string): Promise<{ success: boolean; user: User }> {
-    return this.request(`/api/owner/users/${userId}/reactivate`, {
+    return this.request(`/api/worker/owner/users/${encodeURIComponent(userId)}/reactivate`, {
       method: 'POST',
     });
   }
 
   async getOwnerControlCenter(): Promise<any> {
-    return this.request('/api/owner/control-center');
+    return this.request('/api/worker/owner/control-center');
   }
 
   async getOwnerAuditLogs(filters?: {
@@ -706,7 +706,7 @@ class ApiService {
     if (filters?.search) params.set('search', filters.search);
     if (filters?.limit) params.set('limit', String(filters.limit));
     const q = params.toString() ? `?${params.toString()}` : '';
-    return this.request(`/api/owner/audit-logs${q}`);
+    return this.request(`/api/worker/owner/audit-logs${q}`);
   }
 
   private async downloadAuthorizedFile(url: string, fallbackFilename: string): Promise<void> {
@@ -765,7 +765,7 @@ class ApiService {
 
   async downloadOwnerAuditLogs(format: 'csv' | 'json'): Promise<void> {
     return this.downloadAuthorizedFile(
-      `/api/owner/audit-logs/export?format=${format}`,
+      `/api/worker/owner/audit-logs/export?format=${format}`,
       `qaflah-audit-log.${format}`
     );
   }
