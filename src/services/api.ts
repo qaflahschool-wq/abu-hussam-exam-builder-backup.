@@ -771,29 +771,29 @@ class ApiService {
   }
 
   async getStorageStatus(): Promise<any> {
-    return this.request('/api/system/storage-status');
+    return this.request('/api/worker/system/storage-status');
   }
 
   async createBackup(): Promise<{ success: boolean; filename: string }> {
-    return this.request('/api/system/backup', {
+    return this.request('/api/worker/system/backup', {
       method: 'POST',
     });
   }
 
   async listBackups(): Promise<string[]> {
-    return this.request('/api/system/backups');
+    return this.request('/api/worker/system/backups');
   }
 
   async downloadCurrentSnapshot(): Promise<void> {
     return this.downloadAuthorizedFile(
-      '/api/system/backup/download',
+      '/api/worker/system/backup/download',
       `qaflah-snapshot-${Date.now()}.json`
     );
   }
 
   async downloadBackupFile(filename: string): Promise<void> {
     return this.downloadAuthorizedFile(
-      `/api/system/backups/${encodeURIComponent(filename)}/download`,
+      `/api/worker/system/backups/${encodeURIComponent(filename)}/download`,
       filename
     );
   }
