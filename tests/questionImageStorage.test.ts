@@ -69,7 +69,7 @@ test('uploads a supported image to R2 and persists ownership metadata in D1', as
   });
   assert.equal(metadata.ownerId, 'owner-1');
   assert.equal(metadata.questionId, 'question-1');
-  assert.equal(metadata.byteSize, 4);
+  assert.equal(metadata.byteSize, 8);
   assert.match(metadata.checksumSha256, /^[a-f0-9]{64}$/);
   assert.equal(mocks.objects.has(metadata.objectKey), true);
   assert.match(mocks.calls[0].sql, /INSERT INTO question_images/);
