@@ -352,7 +352,7 @@ export default {
           return shares.some(x => !!x && typeof x === 'object' &&
             (x as Record<string,unknown>).userId === actor.id &&
             ((x as Record<string,unknown>).permission === 'edit' ||
-             (need === 'view' && (x as Record<string,unknown>).permission === 'view'));
+             (need === 'view' && (x as Record<string,unknown>).permission === 'view')));
         };
         const parse = (s: string): Record<string,unknown>|null => {
           try { const v: unknown = JSON.parse(s); return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string,unknown> : null; }
