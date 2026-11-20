@@ -501,6 +501,8 @@ export default {
         if (!auth.ok) return json({error:auth.error},auth.status);
         const actor=auth.user as Record<string,unknown>;
         if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(actor.role))) return json({error:'FORBIDDEN'},403);
+        const identityPermissions=actor.delegatedPermissions&&typeof actor.delegatedPermissions==='object'?actor.delegatedPermissions as Record<string,unknown>:{};
+        if (String(actor.role)==='SchoolAdmin'&&identityPermissions.canManageIdentity===false) return json({error:'FORBIDDEN_IDENTITY_MANAGEMENT'},403);
         const body:unknown=await request.json().catch(()=>null);
         if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid school identity'},400);
         const current=await env.DB.prepare('SELECT record_json FROM school_settings WHERE singleton_id=1').first<{record_json:string}>();
@@ -557,6 +559,8 @@ export default {
         if (!auth.ok) return json({error:auth.error},auth.status);
         const actor=auth.user as Record<string,unknown>;
         if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(actor.role))) return json({error:'FORBIDDEN'},403);
+        const userPermissions=actor.delegatedPermissions&&typeof actor.delegatedPermissions==='object'?actor.delegatedPermissions as Record<string,unknown>:{};
+        if (String(actor.role)==='SchoolAdmin'&&userPermissions.canManageTeachers===false) return json({error:'FORBIDDEN_USER_MANAGEMENT'},403);
         const r=await env.DB.prepare('SELECT record_json FROM app_users ORDER BY created_at').all<{record_json:string}>();
         if (!r.success) return json({error:'User directory unavailable'},503);
         const users=(r.results||[]).flatMap(row=>{try{const value=JSON.parse(row.record_json) as Record<string,unknown>;
@@ -574,6 +578,8 @@ export default {
         const actor=auth.user as Record<string,unknown>;
         const role=String(actor.role);
         if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(role)) return json({error:'FORBIDDEN'},403);
+        const userPermissions=actor.delegatedPermissions&&typeof actor.delegatedPermissions==='object'?actor.delegatedPermissions as Record<string,unknown>:{};
+        if (role==='SchoolAdmin'&&userPermissions.canManageTeachers===false) return json({error:'FORBIDDEN_USER_MANAGEMENT'},403);
         const body:unknown=await request.json().catch(()=>null);
         if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid user data'},400);
         const input=body as Record<string,unknown>;
@@ -618,10 +624,13 @@ export default {
         if (!auth.ok) return json({error:auth.error},auth.status);
         const actor=auth.user as Record<string,unknown>, actorRole=String(actor.role);
         if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(actorRole)) return json({error:'FORBIDDEN'},403);
+        const userPermissions=actor.delegatedPermissions&&typeof actor.delegatedPermissions==='object'?actor.delegatedPermissions as Record<string,unknown>:{};
+        if (actorRole==='SchoolAdmin'&&userPermissions.canManageTeachers===false) return json({error:'FORBIDDEN_USER_MANAGEMENT'},403);
         const row=await env.DB.prepare('SELECT record_json FROM app_users WHERE id=? LIMIT 1').bind(userItemId).first<{record_json:string}>();
         if (!row) return json({error:'USER_NOT_FOUND'},404);
         const target=JSON.parse(row.record_json) as Record<string,unknown>;
         if (['PlatformOwner','Administrator'].includes(String(target.role)) && actorRole!=='PlatformOwner') return json({error:'OWNER_ACCOUNT_PROTECTED'},403);
+        if (actorRole==='SchoolAdmin'&&String(target.role)!=='Teacher') return json({error:'SCHOOL_ADMIN_CAN_ONLY_MANAGE_TEACHERS'},403);
         const body:unknown=await request.json().catch(()=>null);
         if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid user update'},400);
         const input=body as Record<string,unknown>, allowed=['name','role','status','hasAIAccess','assignedSubjects','assignedGrades','email','phone','school','reviewNotes','delegatedPermissions'];
