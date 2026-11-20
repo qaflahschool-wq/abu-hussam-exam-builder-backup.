@@ -35,8 +35,10 @@ jobs:
           grep -q '<div id="root"' /tmp/index.html
           asset=$(grep -oE 'src="[^"]+\.js"' /tmp/index.html | head -1 | cut -d'"' -f2)
           test -n "$asset"
-          curl --fail --silent --show-error --max-time 30 -o /dev/null "https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev$asset"
-          echo "R2 frontend HTML and JavaScript asset are reachable"
+          curl --fail --silent --show-error --max-time 30 -o /tmp/app.js "https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev$asset"
+          grep -Fq "حالة التخزين الفعلية: Cloudflare D1" /tmp/app.js
+          grep -Fq "كلمة المرور يجب أن تكون بين 8 و128 حرفاً" /tmp/app.js
+          echo "R2 frontend HTML, JavaScript, D1 status UI, and password policy are verified"
 
       - name: Verify protected API routes fail closed without a session
         run: |
