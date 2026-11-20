@@ -1292,7 +1292,7 @@ export default {
       const target=JSON.parse(targetRow.record_json) as Record<string,unknown>;
       if (String(target.role)==='PlatformOwner') return json({error:'PLATFORM_OWNER_PROTECTED'},403);
       const status=action==='suspend'?'SUSPENDED':'ACTIVE',at=new Date().toISOString();
-      const updated={...target,status,authVersion:Number(target.authVersion||0)+1,
+      const updated: Record<string,unknown>={...target,status,authVersion:Number(target.authVersion||0)+1,
         ...(action==='suspend'?{suspendedAt:at}:{reactivatedAt:at})};
       const saved=await env.DB.prepare('UPDATE app_users SET status=?,record_json=?,updated_at=? WHERE id=?')
         .bind(status,JSON.stringify(updated),at,targetId).run();
@@ -1389,7 +1389,7 @@ export default {
       const targetId=body&&typeof body==='object'&&typeof (body as Record<string,unknown>).userId==='string'?String((body as Record<string,unknown>).userId):'';
       const target=await new D1UserRepository(env.DB).findPublicById(targetId);
       if (!target||target.status!=='ACTIVE') return json({error:'USER_NOT_FOUND_OR_INACTIVE'},404);
-      const token=await signWorkerAuthToken({id:target.id,role:target.role},env.SESSION_SECRET,new D1AuthVersionReader(env.DB));
+      const token=await signWorkerAuthToken({id:String(target.id),role:String(target.role)},env.SESSION_SECRET,new D1AuthVersionReader(env.DB));
       return json({success:true,token,user:target});
     }
 
