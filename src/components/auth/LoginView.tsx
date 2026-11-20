@@ -27,6 +27,13 @@ export const LoginView: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showOwnerRecovery, setShowOwnerRecovery] = useState(false);
+  const [recoveryToken, setRecoveryToken] = useState('');
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryConfirm, setRecoveryConfirm] = useState('');
+  const [recoveryError, setRecoveryError] = useState('');
+  const [recoverySuccess, setRecoverySuccess] = useState('');
+  const [recoverySubmitting, setRecoverySubmitting] = useState(false);
 
   // Registration State
   const [publicSubjects, setPublicSubjects] = useState<Subject[]>([]);
@@ -66,6 +73,36 @@ export const LoginView: React.FC = () => {
       setError(err.message || 'تعذر تسجيل الدخول');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleOwnerRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecoveryError('');
+    setRecoverySuccess('');
+    if (recoveryToken.length < 32) {
+      setRecoveryError('أدخل رمز الاستعادة الذي أعددته في إعدادات Cloudflare.');
+      return;
+    }
+    if (recoveryPassword.length < 12 || recoveryPassword.length > 128) {
+      setRecoveryError('كلمة المرور الجديدة يجب أن تكون بين 12 و128 حرفاً.');
+      return;
+    }
+    if (recoveryPassword !== recoveryConfirm) {
+      setRecoveryError('كلمتا المرور غير متطابقتين.');
+      return;
+    }
+    try {
+      setRecoverySubmitting(true);
+      const result = await api.recoverOwner(recoveryToken, recoveryPassword);
+      setRecoverySuccess(result.message || 'تم تحديث كلمة المرور. يمكنك تسجيل الدخول.');
+      setRecoveryToken('');
+      setRecoveryPassword('');
+      setRecoveryConfirm('');
+    } catch (err: any) {
+      setRecoveryError(err.message || 'تعذرت استعادة حساب المالك.');
+    } finally {
+      setRecoverySubmitting(false);
     }
   };
 
@@ -264,6 +301,36 @@ export const LoginView: React.FC = () => {
                   <ArrowLeft className="w-4 h-4" />
                 </button>
               </form>
+
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={() => { setShowOwnerRecovery(!showOwnerRecovery); setRecoveryError(''); setRecoverySuccess(''); }}
+                  className="text-xs font-bold text-[#1B5E3A] hover:underline"
+                >
+                  {showOwnerRecovery ? 'العودة لتسجيل الدخول' : 'استعادة حساب المالك'}
+                </button>
+              </div>
+
+              {showOwnerRecovery && (
+                <form onSubmit={handleOwnerRecovery} className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">استعادة حساب المالك</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600">هذه العملية لمرة واحدة فقط. أدخل رمز OWNER_RECOVERY_TOKEN الذي ستضيفه إلى أسرار Worker في Cloudflare، ثم عيّن كلمة مرور جديدة.</p>
+                  </div>
+                  {recoveryError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs font-bold text-rose-800">{recoveryError}</div>}
+                  {recoverySuccess && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-bold text-emerald-800">{recoverySuccess}</div>}
+                  <label className="block text-xs font-bold text-slate-700">رمز الاستعادة (من Cloudflare)</label>
+                  <input type="password" autoComplete="off" value={recoveryToken} onChange={(e) => setRecoveryToken(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" dir="ltr" />
+                  <label className="block text-xs font-bold text-slate-700">كلمة المرور الجديدة</label>
+                  <input type="password" autoComplete="new-password" value={recoveryPassword} onChange={(e) => setRecoveryPassword(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" dir="ltr" />
+                  <label className="block text-xs font-bold text-slate-700">تأكيد كلمة المرور الجديدة</label>
+                  <input type="password" autoComplete="new-password" value={recoveryConfirm} onChange={(e) => setRecoveryConfirm(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" dir="ltr" />
+                  <button type="submit" disabled={recoverySubmitting} className="w-full rounded-xl bg-amber-700 py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
+                    {recoverySubmitting ? 'جارٍ تحديث كلمة المرور...' : 'تحديث كلمة مرور المالك'}
+                  </button>
+                </form>
+              )}
 
             </>
           ) : (
