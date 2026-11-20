@@ -116,9 +116,24 @@ export default {
     if (!url.pathname.startsWith('/api/') && env.ASSETS) {
       return env.ASSETS.fetch(request);
     }
-    if (!url.pathname.startsWith('/api/') && env.FRONTEND_ORIGIN) {
-      const frontendUrl = new URL(url.pathname + url.search, env.FRONTEND_ORIGIN);
-      return fetch(new Request(frontendUrl, request));
+    if (!url.pathname.startsWith('/api/') && env.QUESTION_IMAGES) {
+      if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Method not allowed' }, 405);
+      let assetPath = '';
+      try { assetPath = decodeURIComponent(url.pathname); } catch { return json({ error: 'Invalid asset path' }, 400); }
+      if (assetPath.includes('..') || assetPath.includes('\\\\') || assetPath.includes('\\0')) return json({ error: 'Invalid asset path' }, 400);
+      assetPath = assetPath === '/' ? 'index.html' : assetPath.replace(/^\\/+/, '');
+      let asset = await env.QUESTION_IMAGES.get('frontend/' + assetPath);
+      if (!asset && !assetPath.includes('.')) {
+        assetPath = 'index.html';
+        asset = await env.QUESTION_IMAGES.get('frontend/index.html');
+      }
+      if (!asset) return new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+      const contentType = asset.httpMetadata?.contentType || 'application/octet-stream';
+      const cacheControl = assetPath === 'index.html' ? 'no-cache' : 'public, max-age=31536000, immutable';
+      return new Response(request.method === 'HEAD' ? null : await asset.arrayBuffer(), {
+        status: 200,
+        headers: { 'Content-Type': contentType, 'Cache-Control': cacheControl, 'X-Content-Type-Options': 'nosniff' },
+      });
     }
 
 
