@@ -101,18 +101,98 @@ async function inlineCssAssetUrls(css: string, stylesheetUrl: string): Promise<s
   return output;
 }
 
+/**
+ * Remove print-only rules copied from the application shell before rendering
+ * the isolated, already-paginated exam sheets. Those rules target the full app
+ * print flow and must not leak into the dedicated PDF document, which defines
+ * its own single page-transition rule.
+ */
+function stripPrintMediaRules(css: string): string {
+  const mediaPrint = /@media\s+(?:only\s+)?print\b[^{}]*\{/gi;
+  let output = '';
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = mediaPrint.exec(css)) !== null) {
+    const openBrace = mediaPrint.lastIndex - 1;
+    let depth = 1;
+    let quote = '';
+    let inComment = false;
+    let closeBrace = -1;
+
+    for (let index = openBrace + 1; index < css.length; index += 1) {
+      const char = css[index];
+      const next = css[index + 1];
+
+      if (inComment) {
+        if (char === '*' && next === '/') {
+          inComment = false;
+          index += 1;
+        }
+        continue;
+      }
+      if (quote) {
+        if (char === '\\') {
+          index += 1;
+        } else if (char === quote) {
+          quote = '';
+        }
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        inComment = true;
+        index += 1;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        quote = char;
+        continue;
+      }
+      if (char === '{') depth += 1;
+      if (char === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          closeBrace = index;
+          break;
+        }
+      }
+    }
+
+    // Leave malformed CSS untouched rather than truncating the remaining file.
+    if (closeBrace === -1) {
+      mediaPrint.lastIndex = css.length;
+      break;
+    }
+
+    output += css.slice(cursor, match.index);
+    cursor = closeBrace + 1;
+    mediaPrint.lastIndex = cursor;
+  }
+
+  return output + css.slice(cursor);
+}
+
 async function buildPdfHeadStyles(): Promise<string> {
   const nodes = Array.from(document.head.querySelectorAll('link[rel="stylesheet"], style'));
   const rendered = await Promise.all(nodes.map(async (node) => {
-    if (node.tagName.toLowerCase() !== 'link') return node.outerHTML;
+    const media = node.getAttribute('media') || '';
+    if (media && /(?:^|,)\s*(?:only\s+)?print\b/i.test(media)) return '';
+
+    if (node.tagName.toLowerCase() !== 'link') {
+      const style = node as HTMLStyleElement;
+      const css = stripPrintMediaRules(style.textContent || '');
+      return '<style>' + css.replace(/<\/style/gi, '<\\/style') + '</style>';
+    }
+
     const href = (node as HTMLLinkElement).href;
     try {
       const url = new URL(href, window.location.href);
       if (url.origin !== window.location.origin) return '';
       const response = await fetch(url.href, { credentials: 'same-origin' });
       if (!response.ok) return '';
-      const css = await inlineCssAssetUrls(await response.text(), url.href);
-      return `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`;
+      const sourceCss = await response.text();
+      const css = stripPrintMediaRules(await inlineCssAssetUrls(sourceCss, url.href));
+      return '<style>' + css.replace(/<\/style/gi, '<\\/style') + '</style>';
     } catch {
       return '';
     }
