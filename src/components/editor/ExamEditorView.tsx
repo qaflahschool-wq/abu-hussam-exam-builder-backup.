@@ -125,18 +125,52 @@ async function buildPdfSheetsHtml(root: HTMLElement): Promise<string> {
   const clone = root.cloneNode(true) as HTMLElement;
   const sourceImages = Array.from(root.querySelectorAll('img'));
   const clonedImages = Array.from(clone.querySelectorAll('img'));
+
+  // The server-side PDF renderer deliberately blocks every network request.
+  // Inline every image before sending the document so the school logo and
+  // question images survive export instead of disappearing in the saved PDF.
   await Promise.all(sourceImages.map(async (image, index) => {
+    const target = clonedImages[index];
+    if (!target) throw new Error('تعذر تجهيز صورة داخل ورقة الاختبار للتصدير.');
+
     await image.decode?.().catch(() => undefined);
-    const source = image.currentSrc || image.src;
-    if (!source.startsWith('blob:')) return;
-    try {
-      const response = await fetch(source);
-      if (!response.ok) return;
-      clonedImages[index].src = await blobToDataUrl(await response.blob());
-    } catch {
-      // Keep the original source; the PDF renderer will show a missing image if unavailable.
+    const source = image.currentSrc || image.src || image.getAttribute('src') || '';
+    if (!source) {
+      throw new Error(`تعذر تحميل الصورة: ${image.alt || 'صورة غير معروفة'}`);
     }
+
+    if (/^data:image\//i.test(source)) {
+      target.src = source;
+    } else {
+      try {
+        const resolved = new URL(source, window.location.href);
+        const sameOrigin = resolved.origin === window.location.origin;
+        const response = await fetch(resolved.href, {
+          mode: 'cors',
+          credentials: sameOrigin ? 'same-origin' : 'omit',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (!blob.type.toLowerCase().startsWith('image/')) {
+          throw new Error('المورد المسترجع ليس ملف صورة صالحاً.');
+        }
+        target.src = await blobToDataUrl(blob);
+      } catch (error) {
+        // Never silently create a PDF with a missing school logo or question image.
+        throw new Error(
+          `تعذر تضمين الصورة "${image.alt || 'داخل الاختبار'}" في ملف PDF. تحقق من رابط الصورة وإمكانية الوصول إليها ثم أعد التصدير.`
+        );
+      }
+    }
+
+    target.removeAttribute('srcset');
+    target.removeAttribute('sizes');
+    target.loading = 'eager';
+    await target.decode?.().catch(() => {
+      throw new Error(`تعذر فك ترميز الصورة "${image.alt || 'داخل الاختبار'}" قبل إنشاء PDF.`);
+    });
   }));
+
   return clone.outerHTML;
 }
 
