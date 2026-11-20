@@ -373,7 +373,7 @@ class ApiService {
     educationalLevel?: EducationalLevel;
     grammarCategory?: string;
   }): Promise<{ success: boolean; question: Question; modelUsed: string }> {
-    return this.request('/api/questions/generate', {
+    return this.request('/api/worker/questions/generate', {
       method: 'POST',
       body: JSON.stringify(params),
     });
@@ -584,29 +584,29 @@ class ApiService {
 
   // AI Settings & Diagnostics (Owner Only)
   async getAISettings(): Promise<AISettingsState> {
-    return this.request('/api/ai/settings');
+    return this.request('/api/worker/ai/settings');
   }
 
   async updateAISettings(settings: Partial<AISettingsState>): Promise<{ success: boolean; settings: AISettingsState }> {
-    return this.request('/api/ai/settings', {
+    return this.request('/api/worker/ai/settings', {
       method: 'POST',
       body: JSON.stringify(settings),
     });
   }
 
   async getAIModels(): Promise<any[]> {
-    return this.request('/api/ai/models');
+    return this.request('/api/worker/ai/models');
   }
 
   async pingAI(model?: string): Promise<{ success: boolean; model: string; latencyMs: number; message: string }> {
-    return this.request('/api/ai/ping', {
+    return this.request('/api/worker/ai/ping', {
       method: 'POST',
       body: JSON.stringify({ model }),
     });
   }
 
   async getAILogs(): Promise<AIUsageLog[]> {
-    return this.request('/api/ai/logs');
+    return this.request('/api/worker/ai/logs');
   }
 
   // System & Users
