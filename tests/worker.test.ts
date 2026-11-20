@@ -640,28 +640,27 @@ test('Worker exam sharing is owner-only and stores explicit permission', async (
 });
 
 
+
 test('Worker bootstrap creates the first platform owner exactly once', async () => {
   let userCount = 0;
   const db = {
     prepare(sql: string) {
-      return {
-        bind(..._values: unknown[]) {
-          return {
-            async first<T>() {
-              if (sql.includes('SELECT COUNT(*) AS total FROM app_users')) return { total: userCount } as T;
-              return null;
-            },
-            async all<T>() { return { success: true, results: [] as T[] }; },
-            async run() { userCount += 1; return { success: true, meta: { changes: 1 } }; },
-          };
+      let values: unknown[] = [];
+      const statement = {
+        bind(...input: unknown[]) { values = input; return statement; },
+        async first<T>() {
+          if (sql.includes('SELECT COUNT(*) AS total FROM app_users')) return { total: userCount } as T;
+          return null;
         },
+        async all<T>() { return { success: true, results: [] as T[] }; },
+        async run() { userCount += 1; return { success: true, meta: { changes: 1 } }; },
       };
+      return statement;
     },
   };
   const response = await worker.fetch(
     new Request('https://worker.test/api/worker/bootstrap', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ token: 'bootstrap-token-with-at-least-32-characters', fullName: 'Platform Owner', username: 'abu.hussam', password: 'a-very-strong-initial-password' }),
     }),
     { DB: db as never, SESSION_SECRET: SECRET, BOOTSTRAP_TOKEN: 'bootstrap-token-with-at-least-32-characters' },
@@ -672,8 +671,7 @@ test('Worker bootstrap creates the first platform owner exactly once', async () 
   assert.equal('passwordHash' in body.user, false);
   const second = await worker.fetch(
     new Request('https://worker.test/api/worker/bootstrap', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ token: 'bootstrap-token-with-at-least-32-characters', fullName: 'Another Owner', username: 'another.owner', password: 'another-very-strong-password' }),
     }),
     { DB: db as never, SESSION_SECRET: SECRET, BOOTSTRAP_TOKEN: 'bootstrap-token-with-at-least-32-characters' },
@@ -688,44 +686,43 @@ test('Worker creates and decrypts a private encrypted D1 backup in R2', async ()
   let backupRow: Record<string, unknown> | undefined;
   const db = {
     prepare(sql: string) {
-      return {
-        bind(...values: unknown[]) {
-          return {
-            async first<T>() {
-              if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
-              if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(owner) } as T;
-              if (sql.includes('FROM backup_metadata ORDER BY created_at DESC LIMIT 1')) return backupRow as T || null;
-              return null;
-            },
-            async all<T>() { return { success: true, results: [] as T[] }; },
-            async run() {
-              if (sql.includes('INSERT INTO backup_metadata')) {
-                backupRow = { id: values[0], filename: values[1], object_key: values[2], byte_size: values[3], iv_hex: values[4], created_by: values[5], created_at: values[6], record_json: values[7] };
-              }
-              return { success: true, meta: { changes: 1 } };
-            },
-          };
+      let values: unknown[] = [];
+      const statement = {
+        bind(...input: unknown[]) { values = input; return statement; },
+        async first<T>() {
+          if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+          if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(owner) } as T;
+          if (sql.includes('FROM backup_metadata ORDER BY created_at DESC LIMIT 1')) return backupRow as T || null;
+          return null;
+        },
+        async all<T>() { return { success: true, results: [] as T[] }; },
+        async run() {
+          if (sql.includes('INSERT INTO backup_metadata')) {
+            backupRow = { id: values[0], filename: values[1], object_key: values[2], byte_size: values[3], iv_hex: values[4], created_by: values[5], created_at: values[6], record_json: values[7] };
+          }
+          return { success: true, meta: { changes: 1 } };
         },
       };
+      return statement;
     },
   };
   const bucket = {
     async put(_key: string, bytes: Uint8Array) { storedBytes = new Uint8Array(bytes); },
-    async get(_key: string) { return storedBytes ? { arrayBuffer: async () => storedBytes!.buffer.slice(storedBytes!.byteOffset, storedBytes!.byteOffset + storedBytes!.byteLength) } : null; },
+    async get(_key: string) {
+      if (!storedBytes) return null;
+      const copy = new Uint8Array(storedBytes);
+      return { arrayBuffer: async () => copy.buffer as ArrayBuffer };
+    },
     async delete(_key: string) {},
   };
   const create = await worker.fetch(
-    new Request('https://worker.test/api/worker/system/backup', {
-      method: 'POST', headers: { authorization: `Bearer ${token}` },
-    }),
+    new Request('https://worker.test/api/worker/system/backup', { method: 'POST', headers: { authorization: `Bearer ${token}` } }),
     { DB: db as never, QUESTION_IMAGES: bucket as never, SESSION_SECRET: SECRET },
   );
   assert.equal(create.status, 200);
   assert.ok(storedBytes && storedBytes.length > 0);
   const download = await worker.fetch(
-    new Request('https://worker.test/api/worker/system/backup/download', {
-      headers: { authorization: `Bearer ${token}` },
-    }),
+    new Request('https://worker.test/api/worker/system/backup/download', { headers: { authorization: `Bearer ${token}` } }),
     { DB: db as never, QUESTION_IMAGES: bucket as never, SESSION_SECRET: SECRET },
   );
   assert.equal(download.status, 200);
@@ -733,3 +730,4 @@ test('Worker creates and decrypts a private encrypted D1 backup in R2', async ()
   assert.equal(snapshot.format, 'ABU_HUSSAM_D1_BACKUP_V1');
   assert.ok(Array.isArray(snapshot.tables.app_users));
 });
+
