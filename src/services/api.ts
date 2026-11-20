@@ -611,29 +611,29 @@ class ApiService {
 
   // System & Users
   async getColleagues(): Promise<{ id: string; name: string; username: string; role: string }[]> {
-    return this.request('/api/system/colleagues');
+    return this.request('/api/worker/system/colleagues');
   }
 
   async getUsers(): Promise<User[]> {
-    return this.request('/api/system/users');
+    return this.request('/api/worker/system/users');
   }
 
   async createUser(userData: any): Promise<{ success: boolean; user: User }> {
-    return this.request('/api/system/users', {
+    return this.request('/api/worker/system/users', {
       method: 'POST',
       body: JSON.stringify(userData),
     });
   }
 
   async updateUser(userId: string, patch: Partial<User>): Promise<{ success: boolean; user: User }> {
-    return this.request(`/api/system/users/${userId}`, {
+    return this.request(`/api/worker/system/users/${encodeURIComponent(userId)}`, {
       method: 'PUT',
       body: JSON.stringify(patch),
     });
   }
 
   async getAuditLogs(): Promise<any[]> {
-    return this.request('/api/system/audit-logs');
+    return this.request('/api/worker/system/audit-logs');
   }
 
   // Owner Registration Requests, Account Lifecycle & Control Center
