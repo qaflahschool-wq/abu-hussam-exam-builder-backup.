@@ -381,15 +381,15 @@ class ApiService {
 
   // Exams
   async getExams(): Promise<Exam[]> {
-    return this.request('/api/exams');
+    return this.request('/api/worker/exams');
   }
 
   async getExamById(id: string): Promise<Exam> {
-    return this.request(`/api/exams/${id}`);
+    return this.request(`/api/worker/exams/${encodeURIComponent(id)}`);
   }
 
   async saveExam(exam: Partial<Exam>): Promise<{ success: boolean; exam: Exam }> {
-    return this.request('/api/exams', {
+    return this.request('/api/worker/exams', {
       method: 'POST',
       body: JSON.stringify(exam),
     });
@@ -409,13 +409,13 @@ class ApiService {
   }
 
   async cloneExam(id: string): Promise<{ success: boolean; exam: Exam }> {
-    return this.request(`/api/exams/${id}/clone`, {
+    return this.request(`/api/worker/exams/${encodeURIComponent(id)}/clone`, {
       method: 'POST',
     });
   }
 
   async approveExam(id: string): Promise<{ success: boolean; exam: Exam }> {
-    return this.request(`/api/exams/${id}/approve`, {
+    return this.request(`/api/worker/exams/${encodeURIComponent(id)}/approve`, {
       method: 'POST',
     });
   }
