@@ -396,7 +396,7 @@ class ApiService {
   }
 
   async updateExam(id: string, exam: Partial<Exam>): Promise<{ success: boolean; exam: Exam }> {
-    return this.request(`/api/exams/${id}`, {
+    return this.request(`/api/worker/exams/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(exam),
     });
@@ -421,14 +421,14 @@ class ApiService {
   }
 
   async shareExam(examId: string, targetUserId: string, permission: 'view' | 'edit'): Promise<{ success: boolean; exam: Exam }> {
-    return this.request(`/api/exams/${examId}/share`, {
+    return this.request(`/api/worker/exams/${encodeURIComponent(examId)}/share`, {
       method: 'POST',
       body: JSON.stringify({ targetUserId, permission }),
     });
   }
 
   async revokeExamShare(examId: string, targetUserId: string): Promise<{ success: boolean; exam: Exam }> {
-    return this.request(`/api/exams/${examId}/share/${targetUserId}`, {
+    return this.request(`/api/worker/exams/${encodeURIComponent(examId)}/share/${encodeURIComponent(targetUserId)}`, {
       method: 'DELETE',
     });
   }
@@ -573,11 +573,11 @@ class ApiService {
 
   // Archive
   async getArchive(): Promise<Exam[]> {
-    return this.request('/api/archive');
+    return this.request('/api/worker/archive');
   }
 
   async restoreExam(id: string): Promise<{ success: boolean }> {
-    return this.request(`/api/archive/${id}/restore`, {
+    return this.request(`/api/worker/archive/${encodeURIComponent(id)}/restore`, {
       method: 'POST',
     });
   }
