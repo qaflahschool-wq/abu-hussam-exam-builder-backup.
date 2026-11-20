@@ -332,7 +332,7 @@ test('Worker stores question images in private R2 under the authenticated owner,
       body: JSON.stringify({
         ownerId: 'attacker-controlled-owner',
         questionId: 'question-123',
-        imageDataUrl: 'data:image/png;base64,AQID',
+        imageDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
       }),
     }),
     { DB: db as never, QUESTION_IMAGES: bucket as never, SESSION_SECRET: SECRET },
