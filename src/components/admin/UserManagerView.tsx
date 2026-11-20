@@ -53,6 +53,10 @@ export const UserManagerView: React.FC = () => {
       alert('يرجى ملء جميع الحقول المطلوبة');
       return;
     }
+    if (password.length < 8 || password.length > 128) {
+      alert('كلمة المرور يجب أن تكون بين 8 و128 حرفاً');
+      return;
+    }
     try {
       const res = await api.createUser({
         username,
@@ -97,8 +101,8 @@ export const UserManagerView: React.FC = () => {
   };
 
   const handleResetPassword = async () => {
-    if (!targetUser || !newPassword || newPassword.length < 4) {
-      alert('كلمة المرور يجب ألا تقل عن 4 أحرف');
+    if (!targetUser || newPassword.length < 8 || newPassword.length > 128) {
+      alert('كلمة المرور يجب أن تكون بين 8 و128 حرفاً');
       return;
     }
     try {
@@ -499,6 +503,8 @@ export const UserManagerView: React.FC = () => {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="••••••••"
+                minLength={8}
+                maxLength={128}
                 className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs"
                 dir="ltr"
               />
