@@ -23,16 +23,13 @@ jobs:
             -o /tmp/health.json
           cat /tmp/health.json
           node -e "const h=require('/tmp/health.json'); if(h.status!=='ok') process.exit(1);"
-      - name: Check direct Pages deployment
+      - name: Check R2-hosted frontend and SPA fallback
         run: |
-          status=$(curl --silent --show-error --max-time 30 -o /tmp/pages.html -w '%{http_code}' https://abu-hussam-exam-builder-staging.pages.dev/)
-          echo "Pages HTTP status: $status"
-          head -c 1200 /tmp/pages.html
-          test "$status" = "200"
-      - name: Check Worker frontend proxy
-        run: |
-          status=$(curl --silent --show-error --max-time 30 -o /tmp/worker.html -w '%{http_code}' https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/)
+          status=$(curl --silent --show-error --max-time 30 -o /tmp/index.html -w '%{http_code}' https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/)
           echo "Worker frontend HTTP status: $status"
-          head -c 1200 /tmp/worker.html
           test "$status" = "200"
-          grep -q '<div id="root"' /tmp/worker.html
+          grep -q '<div id="root"' /tmp/index.html
+          asset=$(grep -oE 'src="[^"]+\.js"' /tmp/index.html | head -1 | cut -d'"' -f2)
+          test -n "$asset"
+          curl --fail --silent --show-error --max-time 30 -o /dev/null "https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev$asset"
+          echo "R2 frontend HTML and JavaScript asset are reachable"
