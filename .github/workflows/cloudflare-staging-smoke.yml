@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check deployed Worker health after R2 frontend rollout
+      - name: Check deployed Worker health after final secret rotation
         run: |
           curl --fail --silent --show-error --max-time 30 \
             https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/api/worker/health \
