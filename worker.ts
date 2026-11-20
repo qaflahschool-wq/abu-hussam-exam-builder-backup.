@@ -637,6 +637,106 @@ export default {
       } catch(e) { console.error('Worker user update failed',e); return json({error:'User update failed'},500); }
     }
 
+
+    const backupTables=['app_users','registration_requests','notifications','subjects','school_settings','curricula','questions','exams','archived_exams','layout_templates','analyzed_documents','ai_settings','ai_usage_logs','audit_logs','question_images','auth_rate_limits','app_migrations'];
+    const isPlatformOwner=async (request:Request) => {
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return {auth,ownerId:'',isOwner:false};
+      return {auth,ownerId:String(auth.user.id),isOwner:String(auth.user.role)==='PlatformOwner'};
+    };
+    const makeBackup=async (ownerId:string) => {
+      if (!env.QUESTION_IMAGES) throw new Error('Private R2 bucket binding is missing');
+      const tables:Record<string,unknown[]>={};
+      for (const table of backupTables) {
+        const result=await env.DB.prepare('SELECT * FROM '+table).all<Record<string,unknown>>();
+        if (!result.success) throw new Error('Could not read table '+table);
+        tables[table]=result.results||[];
+      }
+      const createdAt=new Date().toISOString(),id='backup-'+crypto.randomUUID();
+      const snapshot={format:'ABU_HUSSAM_D1_BACKUP_V1',createdAt,tables};
+      const plain=new TextEncoder().encode(JSON.stringify(snapshot));
+      const iv=crypto.getRandomValues(new Uint8Array(12));
+      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(env.SESSION_SECRET));
+      const key=await crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['encrypt','decrypt']);
+      const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,plain));
+      const ivHex=Array.from(iv,x=>x.toString(16).padStart(2,'0')).join('');
+      const filename='abu-hussam-backup-'+createdAt.replace(/[:.]/g,'-')+'-'+id.slice(-8)+'.json.enc';
+      const objectKey='backups/'+id+'.bin';
+      await env.QUESTION_IMAGES.put(objectKey,encrypted,{httpMetadata:{contentType:'application/octet-stream'},customMetadata:{backupId:id,createdBy:ownerId}});
+      const record={id,filename,objectKey,byteSize:encrypted.byteLength,ivHex,createdBy:ownerId,createdAt};
+      const saved=await env.DB.prepare('INSERT INTO backup_metadata (id,filename,object_key,byte_size,iv_hex,created_by,created_at,record_json) VALUES (?,?,?,?,?,?,?,?)')
+        .bind(id,filename,objectKey,encrypted.byteLength,ivHex,ownerId,createdAt,JSON.stringify(record)).run();
+      if (!saved.success) { await env.QUESTION_IMAGES.delete(objectKey).catch(()=>undefined); throw new Error('Backup metadata could not be stored'); }
+      return record;
+    };
+    const readBackup=async (record:Record<string,unknown>) => {
+      if (!env.QUESTION_IMAGES) throw new Error('Private R2 bucket binding is missing');
+      const object=await env.QUESTION_IMAGES.get(String(record.object_key));
+      if (!object) throw new Error('Backup object is missing from R2');
+      const encrypted=await object.arrayBuffer();
+      const ivText=String(record.iv_hex||'');
+      if (!/^[a-f0-9]{24}$/.test(ivText)) throw new Error('Backup encryption metadata is invalid');
+      const iv=new Uint8Array(ivText.match(/.{2}/g)!.map(x=>parseInt(x,16)));
+      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(env.SESSION_SECRET));
+      const key=await crypto.subtle.importKey('raw',digest,{name:'AES-GCM'},false,['decrypt']);
+      const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,encrypted);
+      const parsed:unknown=JSON.parse(new TextDecoder().decode(plain));
+      if (!parsed||typeof parsed!=='object'||(parsed as Record<string,unknown>).format!=='ABU_HUSSAM_D1_BACKUP_V1') throw new Error('Backup format is invalid');
+      return plain;
+    };
+    if (url.pathname==='/api/worker/system/storage-status' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await isPlatformOwner(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.isOwner) return json({error:'FORBIDDEN'},403);
+      try {
+        const [users,questions,exams,images,backups]=await Promise.all([
+          env.DB.prepare('SELECT COUNT(*) AS total FROM app_users').first<{total:number}>(),
+          env.DB.prepare('SELECT COUNT(*) AS total FROM questions').first<{total:number}>(),
+          env.DB.prepare('SELECT COUNT(*) AS total FROM exams').first<{total:number}>(),
+          env.DB.prepare('SELECT COUNT(*) AS total FROM question_images').first<{total:number}>(),
+          env.DB.prepare('SELECT COUNT(*) AS total FROM backup_metadata').first<{total:number}>()
+        ]);
+        return json({database:'D1',r2Configured:Boolean(env.QUESTION_IMAGES),users:Number(users?.total||0),
+          questions:Number(questions?.total||0),exams:Number(exams?.total||0),questionImages:Number(images?.total||0),backups:Number(backups?.total||0)});
+      } catch(e) { console.error('Worker storage status failed',e); return json({error:'Storage status unavailable'},500); }
+    }
+    if (url.pathname==='/api/worker/system/backup' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await isPlatformOwner(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.isOwner) return json({error:'FORBIDDEN'},403);
+      try { const backup=await makeBackup(check.ownerId); return json({success:true,filename:backup.filename}); }
+      catch(e) { console.error('Worker backup creation failed',e); return json({error:'Backup creation failed'},503); }
+    }
+    if (url.pathname==='/api/worker/system/backups' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await isPlatformOwner(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.isOwner) return json({error:'FORBIDDEN'},403);
+      const r=await env.DB.prepare('SELECT filename FROM backup_metadata ORDER BY created_at DESC').all<{filename:string}>();
+      return r.success?json((r.results||[]).map(x=>x.filename)):json({error:'Backup list unavailable'},503);
+    }
+    const backupDownloadMatch=url.pathname.match(/^\/api\/worker\/system\/backups\/([A-Za-z0-9._-]{1,180})\/download$/);
+    const currentBackupDownload=url.pathname==='/api/worker/system/backup/download' && request.method==='GET';
+    if ((backupDownloadMatch||currentBackupDownload) && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await isPlatformOwner(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.isOwner) return json({error:'FORBIDDEN'},403);
+      try {
+        const row=currentBackupDownload
+          ? await env.DB.prepare('SELECT * FROM backup_metadata ORDER BY created_at DESC LIMIT 1').first<Record<string,unknown>>()
+          : await env.DB.prepare('SELECT * FROM backup_metadata WHERE filename=? LIMIT 1').bind(decodeURIComponent(backupDownloadMatch![1])).first<Record<string,unknown>>();
+        if (!row) return json({error:'BACKUP_NOT_FOUND'},404);
+        const plain=await readBackup(row);
+        const safeName=String(row.filename).replace(/[^A-Za-z0-9._-]/g,'_').replace(/\.enc$/,'');
+        return new Response(plain,{status:200,headers:{'Content-Type':'application/json; charset=utf-8',
+          'Content-Disposition':'attachment; filename="'+safeName+'"',
+          'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+      } catch(e) { console.error('Worker backup download failed',e); return json({error:'Backup download failed'},500); }
+    }
+
     if (url.pathname==='/api/worker/system/audit-logs' && request.method==='GET') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
       try {
