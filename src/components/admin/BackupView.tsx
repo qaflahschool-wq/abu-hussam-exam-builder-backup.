@@ -7,7 +7,6 @@ import {
   ShieldCheck,
   FileArchive,
   Clock,
-  AlertTriangle,
   Upload,
 } from 'lucide-react';
 
@@ -137,41 +136,28 @@ export const BackupView: React.FC = () => {
         </div>
       </div>
 
-      {/* Honest Storage & Cloud Run Status Card */}
+      {/* Cloudflare D1 and R2 status */}
       <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-xs text-emerald-950 flex items-start gap-3">
         <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <strong className="block font-bold">
-            حالة التخزين الفعلية: {storageStatus?.engine || 'JSON Atomic Store'}
-          </strong>
+        <div className="space-y-2 flex-1">
+          <strong className="block font-bold">حالة التخزين الفعلية: Cloudflare D1</strong>
           <p className="leading-relaxed opacity-90">
-            تُحفظ البيانات بكتابة ذرية (Atomic Write) في{' '}
-            <code className="bg-emerald-100 px-1 py-0.5 rounded font-mono">/data/database.json</code> وتبقى ثابتة عند تحديث الصفحة وإعادة تشغيل الخادم في نفس الحاوية.
-            {storageStatus && (
-              <span className="block mt-1 font-mono text-[11px] tabular-nums">
-                الحجم الحالي: {storageStatus.sizeKb} KB · الاختبارات: {storageStatus.counts?.exams} · الأسئلة:{' '}
-                {storageStatus.counts?.questions} · المستخدمون: {storageStatus.counts?.users} · قيود التدقيق:{' '}
-                {storageStatus.counts?.auditLogs}
-              </span>
-            )}
+            تُحفظ بيانات المنظومة في قاعدة بيانات D1 السحابية، وتُحفظ صور الأسئلة في مخزن R2 الخاص عند تفعيل الربط.
           </p>
+          {storageStatus ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono text-[11px] tabular-nums">
+              <span>المستخدمون: {storageStatus.users ?? '—'}</span>
+              <span>الاختبارات: {storageStatus.exams ?? '—'}</span>
+              <span>الأسئلة: {storageStatus.questions ?? '—'}</span>
+              <span>صور الأسئلة: {storageStatus.questionImages ?? '—'}</span>
+              <span>النسخ الاحتياطية: {storageStatus.backups ?? '—'}</span>
+              <span>R2: {storageStatus.r2Configured ? 'مرتبط' : 'غير مرتبط'}</span>
+            </div>
+          ) : (
+            <p className="text-amber-800">تعذر تحميل تفاصيل التخزين. أعد تحميل الصفحة للتحقق من الاتصال.</p>
+          )}
         </div>
       </div>
-
-      {storageStatus?.ephemeralContainerDiskWarning && (
-        <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-xs text-amber-950 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <strong className="block font-bold">
-              تنبيه بيئة Cloud Run بدون قاعدة خارجية مفعّلة ({storageStatus.environment?.serviceName})
-            </strong>
-            <p className="leading-relaxed">
-              تعمل الحاوية حالياً على قرص محلي للحاوية دون ربط قاعدة بيانات خارجية (مثل Cloud SQL / Firestore / GCS). يُوصى بتنزيل{' '}
-              <strong>لقطة JSON</strong> دورياً للاحتفاظ بنسخة آمنة خارج الحاوية عند إعادة النشر أو تبديل المراجعة.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Backups List */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
