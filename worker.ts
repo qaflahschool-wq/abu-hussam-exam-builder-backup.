@@ -32,7 +32,7 @@ interface D1PreparedStatement {
 
 interface D1Database {
   prepare(query: string): D1PreparedStatement;
-  batch?(statements: D1PreparedStatement[]): Promise<D1Result[]>;
+  batch?<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
 }
 
 const json = (body: unknown, status = 200): Response =>
