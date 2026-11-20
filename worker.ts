@@ -91,7 +91,7 @@ export default {
         if (!result.success) return json({ error: 'Question bank unavailable' }, 503);
         const assignedGrades = Array.isArray(auth.user.assignedGrades) ? auth.user.assignedGrades.map(String) : [];
         const assignedSubjects = Array.isArray(auth.user.assignedSubjects) ? auth.user.assignedSubjects.map(String) : [];
-        const unrestricted = ['PlatformOwner', 'Administrator', 'SchoolAdmin'].includes(auth.user.role) ||
+        const unrestricted = ['PlatformOwner', 'Administrator', 'SchoolAdmin'].includes(String(auth.user.role)) ||
           assignedGrades.includes('all') || assignedSubjects.includes('all');
         const list = (result.results || []).flatMap((row) => {
           let question: Record<string, unknown>;
