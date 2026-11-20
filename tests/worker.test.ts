@@ -752,3 +752,29 @@ test('Worker scheduled bootstrap provisions one owner when D1 is empty', async (
   await worker.scheduled?.({} as never, { DB: db as never, INITIAL_OWNER_PASSWORD: 'a-long-random-temporary-password' } as never);
   assert.equal(users, 1);
 });
+
+
+test('Worker serves the SPA and static assets from the private R2 frontend prefix', async () => {
+  const html = new TextEncoder().encode('<!doctype html><div id="root"></div>');
+  const js = new TextEncoder().encode('console.log("app")');
+  const bucket = {
+    async get(key: string) {
+      const bytes = key === 'frontend/index.html' ? html : key === 'frontend/assets/app.js' ? js : undefined;
+      if (!bytes) return null;
+      return { arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), httpMetadata: { contentType: key.endsWith('.js') ? 'application/javascript' : 'text/html' } };
+    },
+    async put() {},
+    async delete() {},
+  };
+  const root = await worker.fetch(new Request('https://worker.test/'), { QUESTION_IMAGES: bucket as never } as never);
+  assert.equal(root.status, 200);
+  assert.match(await root.text(), /id="root"/);
+  assert.equal(root.headers.get('content-type'), 'text/html');
+  const route = await worker.fetch(new Request('https://worker.test/dashboard'), { QUESTION_IMAGES: bucket as never } as never);
+  assert.equal(route.status, 200);
+  assert.match(await route.text(), /id="root"/);
+  const asset = await worker.fetch(new Request('https://worker.test/assets/app.js'), { QUESTION_IMAGES: bucket as never } as never);
+  assert.equal(asset.status, 200);
+  assert.equal(await asset.text(), 'console.log("app")');
+  assert.equal(asset.headers.get('content-type'), 'application/javascript');
+});
