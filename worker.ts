@@ -323,6 +323,87 @@ export default {
 
 
 
+
+    // Archive workspace: restore is owner-only and inserts before removing the archived copy.
+    if (url.pathname === '/api/worker/archive' && request.method === 'GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const r=await env.DB.prepare('SELECT record_json FROM archived_exams WHERE owner_id = ? ORDER BY archived_at DESC')
+          .bind(auth.user.id).all<{record_json:string}>();
+        if (!r.success) return json({error:'Archive unavailable'},503);
+        const items=(r.results||[]).flatMap(row=>{try{const v=JSON.parse(row.record_json);return v&&typeof v==='object'?[v]:[]}catch{return[]}});
+        return json(items);
+      } catch(e) { console.error('Worker archive read failed',e); return json({error:'Archive unavailable'},500); }
+    }
+    const restorePrefix='/api/worker/archive/';
+    const restoreTail=url.pathname.startsWith(restorePrefix)?url.pathname.slice(restorePrefix.length):'';
+    const restoreId=restoreTail.endsWith('/restore')?restoreTail.slice(0,-8):'';
+    if (restoreId && /^[A-Za-z0-9_-]{1,128}$/.test(restoreId) && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const row=await env.DB.prepare('SELECT record_json FROM archived_exams WHERE id=? AND owner_id=? LIMIT 1')
+          .bind(restoreId,auth.user.id).first<{record_json:string}>();
+        if (!row) return json({error:'ARCHIVED_EXAM_NOT_FOUND'},404);
+        const exam=JSON.parse(row.record_json) as Record<string,unknown>;
+        const restored={...exam,status:'Draft',archivedAt:null,updatedAt:new Date().toISOString()};
+        const ins=await env.DB.prepare('INSERT INTO exams (id,owner_id,subject_id,grade,status,record_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET owner_id=excluded.owner_id,subject_id=excluded.subject_id,grade=excluded.grade,status=excluded.status,record_json=excluded.record_json,updated_at=excluded.updated_at')
+          .bind(restoreId,auth.user.id,String(restored.subjectId||'subj-en'),String(restored.grade||''),'Draft',JSON.stringify(restored),String(restored.createdAt||new Date().toISOString()),String(restored.updatedAt)).run();
+        if (!ins.success) return json({error:'EXAM_RESTORE_FAILED'},503);
+        const del=await env.DB.prepare('DELETE FROM archived_exams WHERE id=? AND owner_id=?').bind(restoreId,auth.user.id).run();
+        return del.success?json({success:true}):json({error:'EXAM_RESTORE_PENDING_CLEANUP'},503);
+      } catch(e) { console.error('Worker exam restore failed',e); return json({error:'EXAM_RESTORE_FAILED'},500); }
+    }
+
+    // Exam sharing is opt-in and only the owner may grant or revoke access.
+    const sharePrefix='/api/worker/exams/';
+    const shareTail=url.pathname.startsWith(sharePrefix)?url.pathname.slice(sharePrefix.length):'';
+    const shareParts=shareTail.split('/');
+    const shareExamId=/^[A-Za-z0-9_-]{1,128}$/.test(shareParts[0]||'')?shareParts[0]:'';
+    if (shareExamId && shareParts[1]==='share' && (shareParts.length===2 || shareParts.length===3) &&
+        ((shareParts.length===2 && request.method==='POST') || (shareParts.length===3 && request.method==='DELETE'))) {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const actor=auth.user as Record<string,unknown>;
+        const row=await env.DB.prepare('SELECT record_json FROM exams WHERE id=? AND owner_id=? LIMIT 1')
+          .bind(shareExamId,actor.id).first<{record_json:string}>();
+        if (!row) return json({error:'EXAM_NOT_FOUND_OR_NOT_OWNER'},404);
+        const exam=JSON.parse(row.record_json) as Record<string,unknown>;
+        let shares=Array.isArray(exam.sharedWith)?[...exam.sharedWith] as Array<Record<string,unknown>>:[];
+        if (request.method==='POST') {
+          const body:unknown=await request.json().catch(()=>null);
+          if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid share request'},400);
+          const input=body as Record<string,unknown>;
+          const targetId=typeof input.targetUserId==='string'?input.targetUserId:'';
+          const permission=input.permission==='edit'?'edit':input.permission==='view'?'view':'';
+          if (!/^[A-Za-z0-9_-]{1,128}$/.test(targetId)||!permission||targetId===actor.id) return json({error:'Invalid share target or permission'},400);
+          const target=await new D1UserRepository(env.DB).findPublicById(targetId);
+          if (!target||target.status!=='ACTIVE') return json({error:'SHARE_TARGET_UNAVAILABLE'},404);
+          const grades=Array.isArray(target.assignedGrades)?target.assignedGrades.map(String):[];
+          const subjects=Array.isArray(target.assignedSubjects)?target.assignedSubjects.map(String):[];
+          const isAdmin=['PlatformOwner','Administrator','SchoolAdmin'].includes(String(target.role));
+          if (!isAdmin && (!(grades.includes('all')||grades.includes(String(exam.grade||''))) ||
+              !(subjects.includes('all')||subjects.includes(String(exam.subjectId||'subj-en'))))) return json({error:'SHARE_TARGET_OUT_OF_SCOPE'},403);
+          shares=shares.filter(x=>x.userId!==targetId);
+          shares.push({userId:targetId,permission,sharedAt:new Date().toISOString(),sharedBy:actor.id});
+        } else {
+          const targetId=shareParts[2];
+          if (!/^[A-Za-z0-9_-]{1,128}$/.test(targetId)) return json({error:'Invalid share target'},400);
+          shares=shares.filter(x=>x.userId!==targetId);
+        }
+        const updated={...exam,sharedWith:shares,sharingEnabled:shares.length>0,updatedAt:new Date().toISOString()};
+        const saved=await env.DB.prepare('UPDATE exams SET record_json=?,updated_at=? WHERE id=? AND owner_id=?')
+          .bind(JSON.stringify(updated),String(updated.updatedAt),shareExamId,actor.id).run();
+        if (!saved.success||Number(saved.meta?.changes||0)!==1) return json({error:'EXAM_SHARE_UPDATE_FAILED'},503);
+        return json({success:true,exam:updated});
+      } catch(e) { console.error('Worker exam sharing failed',e); return json({error:'EXAM_SHARE_FAILED'},500); }
+    }
+
     const examPrefix = '/api/worker/exams/';
     const examTail = url.pathname.startsWith(examPrefix) ? url.pathname.slice(examPrefix.length) : '';
     const examParts = examTail.split('/');
