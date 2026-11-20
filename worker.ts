@@ -11,6 +11,7 @@ interface Env {
   DB: D1Database;
   SESSION_SECRET: string;
   BOOTSTRAP_TOKEN?: string;
+  GEMINI_API_KEY?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   QUESTION_IMAGES?: R2Bucket;
   BROWSER?: { quickAction(action: 'pdf', options: Record<string, unknown>): Promise<Response> };
@@ -685,6 +686,145 @@ export default {
       if (!parsed||typeof parsed!=='object'||(parsed as Record<string,unknown>).format!=='ABU_HUSSAM_D1_BACKUP_V1') throw new Error('Backup format is invalid');
       return plain;
     };
+
+    const aiModels=[
+      {id:'gemini-3.8-flash',name:'Gemini 3.8 Flash (الموديل الموصى به)',isFreeTier:true,description:'سريع لتوليد وفحص الاختبارات المدرسية.'},
+      {id:'gemini-3.1-flash-lite',name:'Gemini 3.1 Flash Lite (الاحتياطي السريع)',isFreeTier:true,description:'خيار احتياطي سريع واقتصادي.'}
+    ];
+    const aiDefaults={apiKeyConfigured:Boolean(env.GEMINI_API_KEY),primaryModel:'gemini-3.8-flash',fallbackModel:'gemini-3.1-flash-lite',
+      allowPaidModels:false,temperature:0.3,totalRequests:0,activeStatus:env.GEMINI_API_KEY?'Configured':'NotConfigured'};
+    const aiAccess=async (request:Request) => {
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return {auth,allowed:false,userId:''};
+      const user=auth.user as Record<string,unknown>;
+      return {auth,allowed:user.hasAIAccess===true&&['PlatformOwner','Administrator'].includes(String(user.role)),userId:String(user.id)};
+    };
+    const readAISettings=async () => {
+      const row=await env.DB.prepare('SELECT record_json FROM ai_settings WHERE singleton_id=1').first<{record_json:string}>();
+      let stored:Record<string,unknown>={};
+      if (row) {try {stored=JSON.parse(row.record_json) as Record<string,unknown>}catch{/* use defaults */}}
+      return {...aiDefaults,...stored,apiKeyConfigured:Boolean(env.GEMINI_API_KEY)};
+    };
+    const writeAILog=async (userId:string,operation:string,model:string,status:string,promptSnippet:string,durationMs:number,errorMessage?:string) => {
+      const createdAt=new Date().toISOString(),id='ai-log-'+crypto.randomUUID();
+      const log={id,timestamp:createdAt,userId,operation,model,status,promptSnippet:promptSnippet.slice(0,500),durationMs,errorMessage:errorMessage?.slice(0,500)};
+      await env.DB.prepare('INSERT INTO ai_usage_logs (id,user_id,created_at,record_json) VALUES (?,?,?,?)')
+        .bind(id,userId,createdAt,JSON.stringify(log)).run();
+      const settings=await readAISettings();
+      settings.totalRequests=Number(settings.totalRequests||0)+1;
+      await env.DB.prepare('INSERT INTO ai_settings (singleton_id,record_json,updated_at) VALUES (1,?,?) ON CONFLICT(singleton_id) DO UPDATE SET record_json=excluded.record_json,updated_at=excluded.updated_at')
+        .bind(JSON.stringify(settings),createdAt).run();
+    };
+    const generateGemini=async (model:string,prompt:string,temperature=0.3) => {
+      if (!env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not configured');
+      const endpoint='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(env.GEMINI_API_KEY);
+      const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',temperature}})});
+      const payload:unknown=await response.json().catch(()=>null);
+      if (!response.ok) throw new Error('Gemini request failed with status '+response.status);
+      const candidates=(payload as Record<string,unknown>)?.candidates;
+      const first=Array.isArray(candidates)?candidates[0] as Record<string,unknown>:null;
+      const content=first?.content as Record<string,unknown>|undefined;
+      const parts=Array.isArray(content?.parts)?content?.parts as Array<Record<string,unknown>>:[];
+      const textValue=parts.map(p=>typeof p.text==='string'?p.text:'').join('');
+      if (!textValue) throw new Error('Gemini returned an empty response');
+      return textValue;
+    };
+    if (url.pathname==='/api/worker/ai/settings' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      try {return json(await readAISettings());} catch(e) {console.error('AI settings read failed',e);return json({error:'AI settings unavailable'},500);}
+    }
+    if (url.pathname==='/api/worker/ai/settings' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      try {
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid AI settings'},400);
+        const input=body as Record<string,unknown>, current=await readAISettings(), patch:Record<string,unknown>={};
+        const allowedModels=new Set(aiModels.map(m=>m.id));
+        if (input.primaryModel!==undefined) {if(typeof input.primaryModel!=='string'||!allowedModels.has(input.primaryModel)) return json({error:'INVALID_PRIMARY_MODEL'},400);patch.primaryModel=input.primaryModel;}
+        if (input.fallbackModel!==undefined) {if(typeof input.fallbackModel!=='string'||!allowedModels.has(input.fallbackModel)) return json({error:'INVALID_FALLBACK_MODEL'},400);patch.fallbackModel=input.fallbackModel;}
+        if (input.allowPaidModels!==undefined) {if(typeof input.allowPaidModels!=='boolean') return json({error:'INVALID_MODEL_POLICY'},400);patch.allowPaidModels=input.allowPaidModels;}
+        if (input.temperature!==undefined) {const n=Number(input.temperature);if(!Number.isFinite(n)||n<0||n>2)return json({error:'INVALID_TEMPERATURE'},400);patch.temperature=n;}
+        const next={...current,...patch,apiKeyConfigured:Boolean(env.GEMINI_API_KEY)};
+        const at=new Date().toISOString();
+        const saved=await env.DB.prepare('INSERT INTO ai_settings (singleton_id,record_json,updated_at) VALUES (1,?,?) ON CONFLICT(singleton_id) DO UPDATE SET record_json=excluded.record_json,updated_at=excluded.updated_at')
+          .bind(JSON.stringify(next),at).run();
+        return saved.success?json({success:true,settings:next}):json({error:'AI_SETTINGS_SAVE_FAILED'},503);
+      } catch(e) {console.error('AI settings update failed',e);return json({error:'AI settings update failed'},500);}
+    }
+    if (url.pathname==='/api/worker/ai/models' && request.method==='GET') {
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      return check.allowed?json(aiModels):json({error:'AI_ACCESS_REQUIRED'},403);
+    }
+    if (url.pathname==='/api/worker/ai/logs' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      const r=await env.DB.prepare('SELECT record_json FROM ai_usage_logs ORDER BY created_at DESC LIMIT 200').all<{record_json:string}>();
+      return r.success?json((r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json)]}catch{return[]}})):json({error:'AI logs unavailable'},503);
+    }
+    if (url.pathname==='/api/worker/ai/ping' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      if (!env.GEMINI_API_KEY) return json({success:false,model:'none',latencyMs:0,message:'GEMINI_API_KEY is not configured'},503);
+      const body:unknown=await request.json().catch(()=>({}));
+      const model=body&&typeof body==='object'&&typeof (body as Record<string,unknown>).model==='string'?String((body as Record<string,unknown>).model):String((await readAISettings()).primaryModel);
+      if (!aiModels.some(m=>m.id===model)) return json({error:'MODEL_NOT_ALLOWED'},400);
+      const started=Date.now();
+      try {
+        await generateGemini(model,'Reply only as JSON: {"status":"connected","service":"Gemini"}',0);
+        const latencyMs=Date.now()-started;
+        await writeAILog(check.userId,'PING_TEST',model,'SUCCESS','Connection test',latencyMs);
+        return json({success:true,model,latencyMs,message:'Gemini connection successful'});
+      } catch(e) {
+        const latencyMs=Date.now()-started;
+        await writeAILog(check.userId,'PING_TEST',model,'ERROR','Connection test',latencyMs,String(e));
+        return json({success:false,model,latencyMs,message:'Gemini connection failed'},502);
+      }
+    }
+    if (url.pathname==='/api/worker/questions/generate' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid question request'},400);
+      const input=body as Record<string,unknown>;
+      const grade=typeof input.grade==='string'?input.grade:'Grade 9';
+      const type=typeof input.type==='string'?input.type:'Multiple Choice';
+      const subjectId=typeof input.subjectId==='string'?input.subjectId:'subj-en';
+      if (subjectId==='subj-quran'||type.startsWith('Quran')) return json({error:'AI generation is disabled for Quranic text'},400);
+      const unitTitle=typeof input.unitTitle==='string'?input.unitTitle:'Unit 1: General';
+      const model=String((await readAISettings()).primaryModel||aiModels[0].id);
+      const started=Date.now();
+      const prompt='You are an expert Yemeni basic education English examiner. Generate one clear exam question as JSON only. Grade: '+grade+'. Unit: '+unitTitle+'. Type: '+type+'. Difficulty: '+String(input.difficulty||'Medium')+'. Marks: '+String(input.marks||2)+'. Focus: '+String(input.lessonFocus||'').slice(0,500)+'. Return keys questionText, instructions, options (only for multiple choice), matchingPairs (only for matching), passage, scrambledWords, modelAnswer, explanation. Use exactly one unambiguous answer.';
+      try {
+        const raw=await generateGemini(model,prompt,Number((await readAISettings()).temperature)||0.3);
+        const parsed=JSON.parse(raw) as Record<string,unknown>;
+        if (typeof parsed.questionText!=='string'||typeof parsed.modelAnswer!=='string') throw new Error('Gemini response schema is invalid');
+        const question={...parsed,id:'q-gen-'+crypto.randomUUID(),grade,unitId:'gen-unit',unitTitle,type,
+          difficulty:String(input.difficulty||'Medium'),marks:Number(input.marks)||2,
+          sourceCode:String(input.sourceCode||'CURRICULUM'),educationalLevel:String(input.educationalLevel||'BASIC'),
+          grammarCategory:typeof input.grammarCategory==='string'?input.grammarCategory:undefined,
+          source:'Gemini AI',ownerId:check.userId,createdAt:new Date().toISOString()};
+        await writeAILog(check.userId,'GENERATE_QUESTION',model,'SUCCESS','Generate '+type+' for '+grade,Date.now()-started);
+        return json({success:true,question,modelUsed:model});
+      } catch(e) {
+        await writeAILog(check.userId,'GENERATE_QUESTION',model,'ERROR','Generate '+type+' for '+grade,Date.now()-started,String(e));
+        return json({error:'Question generation failed'},502);
+      }
+    }
+
     if (url.pathname==='/api/worker/system/storage-status' && request.method==='GET') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
       const check=await isPlatformOwner(request);
