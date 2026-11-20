@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: cloudflare-staging-${{ github.ref }}
@@ -44,3 +44,20 @@ jobs:
 
       - name: Cloudflare Worker bundle validation (no deployment)
         run: npm run worker:dry-run
+
+      - name: Compile deployable Worker bundle without publishing
+        run: npx --yes wrangler@4.165.0 deploy --dry-run --config wrangler.jsonc --outdir .wrangler/staging-bundle
+
+      - name: Package Worker and static assets
+        run: node scripts/export-staging-bundle.mjs
+
+      - name: Publish immutable staging build artifact branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan cloudflare/staging-deploy-artifacts
+          git rm -rf .
+          cp -R /tmp/abu-hussam-staging-deploy-artifact/. .
+          git add .
+          git commit -m "Build staging deployment artifact for ${GITHUB_SHA}"
+          git push origin HEAD:cloudflare/staging-deploy-artifacts --force
