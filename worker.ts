@@ -1,4 +1,5 @@
 import { D1AuthVersionReader } from './server/cloudflare/d1AuthVersionReader.js';
+import bcrypt from 'bcryptjs';
 import { D1UserRepository } from './server/cloudflare/d1UserRepository.js';
 import { WorkerAuthService } from './server/cloudflare/workerAuthService.js';
 import { authenticateWorkerRequest } from './server/cloudflare/workerAuthGuard.js';
@@ -533,6 +534,119 @@ export default {
       }
     }
 
+
+
+    // D1-backed user administration with explicit privilege boundaries.
+    const userCollection='/api/worker/system/users';
+    if ((url.pathname===userCollection || url.pathname==='/api/worker/system/colleagues') &&
+        request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const actor=auth.user as Record<string,unknown>;
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(actor.role))) return json({error:'FORBIDDEN'},403);
+        const r=await env.DB.prepare('SELECT record_json FROM app_users ORDER BY created_at').all<{record_json:string}>();
+        if (!r.success) return json({error:'User directory unavailable'},503);
+        const users=(r.results||[]).flatMap(row=>{try{const value=JSON.parse(row.record_json) as Record<string,unknown>;
+          const {passwordHash:_passwordHash,authVersion:_authVersion,...safe}=value;
+          return [url.pathname.endsWith('/colleagues')?{id:safe.id,name:safe.name,username:safe.username,role:safe.role}:safe];
+        }catch{return[]}});
+        return json(users);
+      } catch(e) { console.error('Worker user directory failed',e); return json({error:'User directory unavailable'},500); }
+    }
+    if (url.pathname===userCollection && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const actor=auth.user as Record<string,unknown>;
+        const role=String(actor.role);
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(role)) return json({error:'FORBIDDEN'},403);
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid user data'},400);
+        const input=body as Record<string,unknown>;
+        const username=typeof input.username==='string'?input.username.trim():'';
+        const name=typeof input.name==='string'?input.name.trim():'';
+        const password=typeof input.password==='string'?input.password:'';
+        if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)||name.length<3||name.length>120||password.length<8||password.length>128) return json({error:'Invalid username, name, or password'},400);
+        const requested=input.role==='PlatformOwner'?'PlatformOwner':input.role==='Administrator'?'Administrator':input.role==='SchoolAdmin'?'SchoolAdmin':'Teacher';
+        if (['PlatformOwner','Administrator','SchoolAdmin'].includes(requested) && role!=='PlatformOwner') return json({error:'Only the platform owner may create privileged accounts'},403);
+        const subjects=Array.isArray(input.assignedSubjects)?input.assignedSubjects.filter((x):x is string=>typeof x==='string'):[];
+        const grades=Array.isArray(input.assignedGrades)?input.assignedGrades.filter((x):x is string=>typeof x==='string'):[];
+        if (requested==='Teacher') {
+          const [subjectRows]=await Promise.all([env.DB.prepare('SELECT record_json FROM subjects WHERE is_active=1').all<{record_json:string}>()]);
+          const valid=new Set((subjectRows.results||[]).flatMap(row=>{try{return [String((JSON.parse(row.record_json) as Record<string,unknown>).id)]}catch{return[]}}));
+          if (!subjects.length||subjects.includes('all')||!subjects.every(x=>valid.has(x))||
+              !grades.length||grades.includes('all')||!grades.every(x=>/^Grade [1-9]$/.test(x))) return json({error:'Invalid teacher assignments'},400);
+        }
+        const existing=await env.DB.prepare('SELECT id FROM app_users WHERE username=? COLLATE NOCASE LIMIT 1').bind(username).first<{id:string}>();
+        if (existing) return json({error:'USERNAME_ALREADY_EXISTS'},409);
+        const schoolRow=await env.DB.prepare('SELECT record_json FROM school_settings WHERE singleton_id=1').first<{record_json:string}>();
+        const school=schoolRow?(JSON.parse(schoolRow.record_json) as Record<string,unknown>):{};
+        const now=new Date().toISOString(), id='usr-'+crypto.randomUUID();
+        const user:Record<string,unknown>={id,username,name,role:requested,status:'ACTIVE',
+          hasAIAccess:role==='PlatformOwner'&&requested==='PlatformOwner'&&input.hasAIAccess===true,
+          assignedSubjects:requested==='Teacher'?subjects:['all'],assignedGrades:requested==='Teacher'?grades:['all'],
+          email:typeof input.email==='string'?input.email.slice(0,254):undefined,phone:typeof input.phone==='string'?input.phone.slice(0,40):undefined,
+          school:typeof school.schoolNameAr==='string'?school.schoolNameAr:'مدرسة قفلة للتعليم الأساسي',
+          reviewedBy:actor.id,reviewedByName:actor.name,reviewedAt:now,createdAt:now,passwordHash:await bcrypt.hash(password,10),authVersion:0};
+        const inserted=await env.DB.prepare('INSERT INTO app_users (id,username,role,status,record_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+          .bind(id,username,requested,'ACTIVE',JSON.stringify(user),now,now).run();
+        if (!inserted.success) return json({error:'USER_CREATE_FAILED'},503);
+        const {passwordHash:_hash,authVersion:_version,...safe}=user;
+        return json({success:true,user:safe});
+      } catch(e) { console.error('Worker user create failed',e); return json({error:'User creation failed'},500); }
+    }
+    const userItemPrefix='/api/worker/system/users/';
+    const userItemId=url.pathname.startsWith(userItemPrefix)?url.pathname.slice(userItemPrefix.length):'';
+    if (userItemId && /^[A-Za-z0-9_-]{1,128}$/.test(userItemId) && request.method==='PUT') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const actor=auth.user as Record<string,unknown>, actorRole=String(actor.role);
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(actorRole)) return json({error:'FORBIDDEN'},403);
+        const row=await env.DB.prepare('SELECT record_json FROM app_users WHERE id=? LIMIT 1').bind(userItemId).first<{record_json:string}>();
+        if (!row) return json({error:'USER_NOT_FOUND'},404);
+        const target=JSON.parse(row.record_json) as Record<string,unknown>;
+        if (['PlatformOwner','Administrator'].includes(String(target.role)) && actorRole!=='PlatformOwner') return json({error:'OWNER_ACCOUNT_PROTECTED'},403);
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid user update'},400);
+        const input=body as Record<string,unknown>, allowed=['name','role','status','hasAIAccess','assignedSubjects','assignedGrades','email','phone','school','reviewNotes','delegatedPermissions'];
+        const patch:Record<string,unknown>={};
+        for (const key of allowed) if (Object.prototype.hasOwnProperty.call(input,key)) patch[key]=input[key];
+        if (actorRole!=='PlatformOwner') {
+          delete patch.hasAIAccess;delete patch.delegatedPermissions;delete patch.status;
+          if (patch.role==='PlatformOwner'||patch.role==='Administrator'||(patch.role==='SchoolAdmin'&&target.role!=='SchoolAdmin')) return json({error:'PRIVILEGE_ESCALATION_BLOCKED'},403);
+        }
+        const nextRole=String(patch.role||target.role);
+        if (nextRole==='Teacher') {
+          const subjects=Array.isArray(patch.assignedSubjects)?patch.assignedSubjects:target.assignedSubjects;
+          const grades=Array.isArray(patch.assignedGrades)?patch.assignedGrades:target.assignedGrades;
+          if (!Array.isArray(subjects)||!subjects.length||subjects.includes('all')||!Array.isArray(grades)||!grades.length||grades.includes('all')||!grades.every(x=>typeof x==='string'&&/^Grade [1-9]$/.test(x))) return json({error:'Invalid teacher assignments'},400);
+          patch.hasAIAccess=false;
+        }
+        const updated={...target,...patch,id:userItemId,updatedAt:new Date().toISOString()};
+        const saved=await env.DB.prepare('UPDATE app_users SET role=?,status=?,record_json=?,updated_at=? WHERE id=?')
+          .bind(String(updated.role),String(updated.status),JSON.stringify(updated),String(updated.updatedAt),userItemId).run();
+        if (!saved.success) return json({error:'USER_UPDATE_FAILED'},503);
+        const {passwordHash:_hash,authVersion:_version,...safe}=updated;
+        return json({success:true,user:safe});
+      } catch(e) { console.error('Worker user update failed',e); return json({error:'User update failed'},500); }
+    }
+
+    if (url.pathname==='/api/worker/system/audit-logs' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        if (String(auth.user.role)!=='PlatformOwner') return json({error:'FORBIDDEN'},403);
+        const r=await env.DB.prepare('SELECT record_json FROM audit_logs ORDER BY timestamp DESC LIMIT 1000').all<{record_json:string}>();
+        if (!r.success) return json({error:'Audit log unavailable'},503);
+        return json((r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json)]}catch{return[]}}));
+      } catch(e) { console.error('Worker audit log read failed',e); return json({error:'Audit log unavailable'},500); }
+    }
 
     if (url.pathname==='/api/worker/system/stats' && request.method==='GET') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
