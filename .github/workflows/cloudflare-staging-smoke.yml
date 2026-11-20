@@ -23,10 +23,16 @@ jobs:
             -o /tmp/health.json
           cat /tmp/health.json
           node -e "const h=require('/tmp/health.json'); if(h.status!=='ok') process.exit(1);"
-      - name: Check deployed frontend proxy
+      - name: Check direct Pages deployment
         run: |
-          curl --fail --silent --show-error --max-time 30 \
-            https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/ \
-            -o /tmp/index.html
-          grep -q '<div id="root"' /tmp/index.html
-          echo "Frontend HTML is reachable ($(wc -c </tmp/index.html) bytes)"
+          status=$(curl --silent --show-error --max-time 30 -o /tmp/pages.html -w '%{http_code}' https://abu-hussam-exam-builder-staging.pages.dev/)
+          echo "Pages HTTP status: $status"
+          head -c 1200 /tmp/pages.html
+          test "$status" = "200"
+      - name: Check Worker frontend proxy
+        run: |
+          status=$(curl --silent --show-error --max-time 30 -o /tmp/worker.html -w '%{http_code}' https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/)
+          echo "Worker frontend HTTP status: $status"
+          head -c 1200 /tmp/worker.html
+          test "$status" = "200"
+          grep -q '<div id="root"' /tmp/worker.html
