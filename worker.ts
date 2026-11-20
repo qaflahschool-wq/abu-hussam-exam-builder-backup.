@@ -763,6 +763,98 @@ export default {
         return json({success:false,model,latencyMs,message:'Gemini connection failed'},502);
       }
     }
+
+    if (url.pathname==='/api/worker/exams/validate' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const body:unknown=await request.json().catch(()=>null);
+      const input=body&&typeof body==='object'?body as Record<string,unknown>:{};
+      const sections=Array.isArray(input.sections)?input.sections as Array<Record<string,unknown>>:[];
+      const totalMarks=Number(input.totalMarks)||20;
+      const checks:{id:string;title:string;passed:boolean;details:string}[]=[];
+      const sum=sections.reduce((sum,section)=>sum+(Number(section.marks)||0),0);
+      const questionCount=sections.reduce((sum,section)=>sum+(Array.isArray(section.questions)?section.questions.length:0),0);
+      const allQuestions=sections.flatMap(section=>Array.isArray(section.questions)?section.questions as Array<Record<string,unknown>>:[]);
+      const missingAnswers=allQuestions.filter(q=>typeof q.modelAnswer!=='string'||!String(q.modelAnswer).trim()).length;
+      const missingPrompts=allQuestions.filter(q=>typeof q.questionText!=='string'||!String(q.questionText).trim()).length;
+      checks.push({id:'sections',title:'Exam contains sections',passed:sections.length>0,details:sections.length+' section(s)'});
+      checks.push({id:'questions',title:'Exam contains questions',passed:questionCount>0,details:questionCount+' question(s)'});
+      checks.push({id:'marks',title:'Section marks match total marks',passed:sum===totalMarks,details:'Sections: '+sum+' / Exam: '+totalMarks});
+      checks.push({id:'answers',title:'All questions have model answers',passed:missingAnswers===0,details:missingAnswers+' missing answer(s)'});
+      checks.push({id:'prompts',title:'All questions have question text',passed:missingPrompts===0,details:missingPrompts+' missing prompt(s)'});
+      const passed=checks.every(x=>x.passed);
+      const warnings=checks.filter(x=>!x.passed).map(x=>x.details);
+      const report={passed,score:Math.round(checks.filter(x=>x.passed).length/checks.length*100),checks,warnings,
+        suggestions:passed?[]:['Review the failed checks before approving or printing the exam.']};
+      return json(report);
+    }
+    if (url.pathname==='/api/worker/exams/generate-ai' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const check=await aiAccess(request);
+      if (!check.auth.ok) return json({error:check.auth.error},check.auth.status);
+      if (!check.allowed) return json({error:'AI_ACCESS_REQUIRED'},403);
+      if (!env.GEMINI_API_KEY) return json({error:'GEMINI_API_KEY is not configured'},503);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid exam generation request'},400);
+      const input=body as Record<string,unknown>;
+      const grade=typeof input.grade==='string'?input.grade:'';
+      const selectedUnits=Array.isArray(input.selectedUnits)?input.selectedUnits.filter((x):x is string=>typeof x==='string'):[];
+      const totalQuestions=Math.min(100,Math.max(1,Number(input.totalQuestions)||20));
+      const totalMarks=Math.min(300,Math.max(1,Number(input.totalMarks)||20));
+      if (!/^Grade [1-9]$/.test(grade)||!selectedUnits.length) return json({error:'Grade and selected units are required'},400);
+      const settings=await readAISettings(),model=String(settings.primaryModel||aiModels[0].id),started=Date.now();
+      const curriculumRows=await env.DB.prepare('SELECT record_json FROM curricula WHERE grade=? AND subject_id=?').bind(grade,'subj-en').all<{record_json:string}>();
+      const curriculum=(curriculumRows.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json) as Record<string,unknown>]}catch{return[]}});
+      const context=curriculum.filter(unit=>selectedUnits.includes(String(unit.id))||selectedUnits.includes(String(unit.title)))
+        .map(unit=>String(unit.title)+': '+JSON.stringify(unit.lessons||[]).slice(0,2500)).join('\n');
+      const prompt='Create a complete English examination for Yemeni basic education. Return JSON only with keys title,titleAr,sections. Each section: sectionTitle,instructions,questionType,marks,questions. Each question: questionText,instructions,options,matchingPairs,passage,scrambledWords,modelAnswer,explanation,marks. Grade '+grade+'. Term '+String(input.term||'First Term')+'. Category '+String(input.category||'Monthly')+'. Units: '+selectedUnits.join(', ')+'. Total questions '+totalQuestions+'. Total marks '+totalMarks+'. Difficulty '+String(input.difficulty||'Medium')+'. Types '+JSON.stringify(input.selectedQuestionTypes||[])+'. Language '+String(input.instructionsLanguage||'Bilingual')+'. Scope '+String(input.contentScope||'CURRICULUM_ENRICHMENT')+'. Lessons '+JSON.stringify(input.selectedLessons||[])+'. Additional instructions '+String(input.customInstructions||'').slice(0,1200)+'. Curriculum reference: '+context+'. Distribute marks so section marks sum exactly to '+totalMarks+'. Ensure question count is exactly '+totalQuestions+'. Do not include Quranic content.';
+      try {
+        const raw=await generateGemini(model,prompt,Number(settings.temperature)||0.3);
+        const generated=JSON.parse(raw) as Record<string,unknown>;
+        if (!Array.isArray(generated.sections)||!generated.sections.length) throw new Error('Generated exam sections are missing');
+        let qIndex=0;
+        const sections=(generated.sections as Array<Record<string,unknown>>).map((section,index)=>{
+          const questions=Array.isArray(section.questions)?section.questions as Array<Record<string,unknown>>:[];
+          return {id:'section-'+crypto.randomUUID(),sectionTitle:String(section.sectionTitle||'Section '+(index+1)),
+            instructions:String(section.instructions||'Answer all questions.'),questionType:String(section.questionType||'Short Answer'),
+            marks:Number(section.marks)||0,questions:questions.map(q=>({...q,id:'q-ai-'+crypto.randomUUID(),ownerId:check.userId,
+              grade,unitId:'ai-generated',type:String(q.type||section.questionType||'Short Answer'),
+              difficulty:String(input.difficulty||'Medium'),marks:Number(q.marks)||1,
+              questionText:String(q.questionText||''),modelAnswer:String(q.modelAnswer||''),
+              source:'Gemini AI',sourceCode:'CURRICULUM',educationalLevel:String(input.educationalLevel||'INTERMEDIATE'),
+              createdAt:new Date().toISOString()}))};
+        });
+        const now=new Date().toISOString();
+        const schoolRow=await env.DB.prepare('SELECT record_json FROM school_settings WHERE singleton_id=1').first<{record_json:string}>();
+        const school=schoolRow?JSON.parse(schoolRow.record_json) as Record<string,unknown>:{};
+        const exam={
+          id:'exam-'+crypto.randomUUID(),ownerId:check.userId,subjectId:'subj-en',code:'AI-'+Date.now(),
+          title:String(generated.title||'AI Generated Examination'),titleAr:String(generated.titleAr||'اختبار مولّد بالذكاء الاصطناعي'),
+          grade,term:String(input.term||'الفصل الدراسي الأول'),category:String(input.category||'Monthly'),
+          totalMarks,timeLimitMinutes:Number(input.timeLimitMinutes)||60,difficulty:String(input.difficulty||'Medium'),
+          contentScope:String(input.contentScope||'CURRICULUM_ENRICHMENT'),
+          instructionsLanguage:String(input.instructionsLanguage||'Bilingual'),
+          headerConfig:{countryTitle:String(school.countryTitleAr||'الجمهورية اليمنية'),ministryTitle:String(school.ministryTitleAr||'وزارة التربية والتعليم'),
+            schoolName:String(school.schoolNameAr||'مدرسة قفلة للتعليم الأساسي'),subject:'اللغة الإنجليزية',subjectEn:'English Language',
+            grade,term:String(input.term||'الفصل الدراسي الأول'),academicYear:String(school.defaultAcademicYear||'2026 / 2027'),
+            timeLimit:String(Number(input.timeLimitMinutes)||60)+' minutes',totalMarks,showSchoolLogo:true,headerLanguage:'ar',headerCompact:false,notes:''},
+          sections,sharingEnabled:false,sharedWith:[],status:'Draft',createdBy:check.userId,createdByName:String(check.auth.user.name||''),
+          createdAt:now,updatedAt:now
+        };
+        const saved=await env.DB.prepare('INSERT INTO exams (id,owner_id,subject_id,grade,status,record_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
+          .bind(exam.id,check.userId,'subj-en',grade,'Draft',JSON.stringify(exam),now,now).run();
+        if (!saved.success) throw new Error('Could not save generated exam');
+        const qualityReport={passed:sections.reduce((sum,s)=>sum+s.marks,0)===totalMarks&&sections.reduce((sum,s)=>sum+s.questions.length,0)===totalQuestions,
+          score:100,checks:[{id:'generated',title:'Generated exam structure',passed:true,details:'AI output was parsed and saved'}],warnings:[],suggestions:['Review all generated questions and answers before approval.']};
+        await writeAILog(check.userId,'GENERATE_EXAM',model,'SUCCESS','Generate exam for '+grade,Date.now()-started);
+        return json({success:true,exam,modelUsed:model,qualityReport});
+      } catch(e) {
+        await writeAILog(check.userId,'GENERATE_EXAM',model,'ERROR','Generate exam for '+grade,Date.now()-started,String(e));
+        return json({error:'AI exam generation failed'},502);
+      }
+    }
+
     if (url.pathname==='/api/worker/questions/generate' && request.method==='POST') {
       if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
       const check=await aiAccess(request);
