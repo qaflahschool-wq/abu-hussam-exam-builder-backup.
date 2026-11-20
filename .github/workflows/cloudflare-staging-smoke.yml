@@ -6,6 +6,10 @@ on:
       - cloudflare/staging-foundation-2026-11-20
     paths:
       - '.github/workflows/cloudflare-staging-smoke.yml'
+      - 'src/**'
+      - 'worker.ts'
+      - 'server/cloudflare/**'
+      - 'wrangler.jsonc'
   workflow_dispatch:
 
 permissions:
@@ -33,3 +37,36 @@ jobs:
           test -n "$asset"
           curl --fail --silent --show-error --max-time 30 -o /dev/null "https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev$asset"
           echo "R2 frontend HTML and JavaScript asset are reachable"
+
+      - name: Verify protected API routes fail closed without a session
+        run: |
+          base="https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev"
+          paths=(
+            /api/worker/auth/me
+            /api/worker/questions
+            /api/worker/exams
+            /api/worker/curricula
+            /api/worker/notifications
+            /api/worker/system/stats
+            /api/worker/layout-templates
+            /api/worker/documents
+            /api/worker/archive
+            /api/worker/ai/settings
+            /api/worker/ai/models
+            /api/worker/ai/logs
+            /api/worker/owner/registration-requests
+            /api/worker/owner/control-center
+            /api/worker/owner/audit-logs
+            /api/worker/system/users
+            /api/worker/system/audit-logs
+            /api/worker/system/storage-status
+          )
+          for path in "${paths[@]}"; do
+            status=$(curl --silent --show-error --max-time 20 -o /tmp/route.json -w '%{http_code}' "$base$path")
+            if [ "$status" != "401" ] && [ "$status" != "403" ]; then
+              echo "Expected an authentication/authorization response for $path, got HTTP $status"
+              cat /tmp/route.json
+              exit 1
+            fi
+            echo "PASS $path -> HTTP $status"
+          done
