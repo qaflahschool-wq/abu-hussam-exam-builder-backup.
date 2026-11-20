@@ -2,6 +2,7 @@ import { D1AuthVersionReader } from './server/cloudflare/d1AuthVersionReader.js'
 import bcrypt from 'bcryptjs';
 import { D1UserRepository } from './server/cloudflare/d1UserRepository.js';
 import { WorkerAuthService } from './server/cloudflare/workerAuthService.js';
+import { signWorkerAuthToken } from './server/cloudflare/workerAuth.js';
 import { authenticateWorkerRequest } from './server/cloudflare/workerAuthGuard.js';
 import { QuestionImageStorage, type R2Bucket } from './server/cloudflare/questionImageStorage.js';
 import { hasValidExamImagePayload } from './server/examImageValidation.js';
@@ -1274,6 +1275,122 @@ export default {
           'Content-Disposition':'attachment; filename="'+safeName+'"',
           'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
       } catch(e) { console.error('Worker backup download failed',e); return json({error:'Backup download failed'},500); }
+    }
+
+
+    // Owner lifecycle and control-center operations.
+    const ownerUserAction=url.pathname.match(/^\/api\/worker\/owner\/users\/([A-Za-z0-9_-]{1,128})\/(suspend|reactivate)$/);
+    if (ownerUserAction && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      if (String(auth.user.role)!=='PlatformOwner') return json({error:'FORBIDDEN'},403);
+      const targetId=ownerUserAction[1],action=ownerUserAction[2];
+      if (targetId===String(auth.user.id)) return json({error:'CANNOT_CHANGE_OWN_ACCOUNT_STATUS'},400);
+      const targetRow=await env.DB.prepare('SELECT record_json FROM app_users WHERE id=? LIMIT 1').bind(targetId).first<{record_json:string}>();
+      if (!targetRow) return json({error:'USER_NOT_FOUND'},404);
+      const target=JSON.parse(targetRow.record_json) as Record<string,unknown>;
+      if (String(target.role)==='PlatformOwner') return json({error:'PLATFORM_OWNER_PROTECTED'},403);
+      const status=action==='suspend'?'SUSPENDED':'ACTIVE',at=new Date().toISOString();
+      const updated={...target,status,authVersion:Number(target.authVersion||0)+1,
+        ...(action==='suspend'?{suspendedAt:at}:{reactivatedAt:at})};
+      const saved=await env.DB.prepare('UPDATE app_users SET status=?,record_json=?,updated_at=? WHERE id=?')
+        .bind(status,JSON.stringify(updated),at,targetId).run();
+      if (!saved.success) return json({error:'USER_STATUS_UPDATE_FAILED'},503);
+      const {passwordHash:_hash,authVersion:_version,...safe}=updated;
+      return json({success:true,user:safe});
+    }
+    if (url.pathname==='/api/worker/owner/control-center' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      if (String(auth.user.role)!=='PlatformOwner') return json({error:'FORBIDDEN'},403);
+      try {
+        const [users,requests,exams,archive,notifications,logs]=await Promise.all([
+          env.DB.prepare('SELECT record_json FROM app_users ORDER BY created_at DESC').all<{record_json:string}>(),
+          env.DB.prepare("SELECT record_json FROM registration_requests WHERE status IN ('PENDING_APPROVAL','NEEDS_EDIT') ORDER BY created_at DESC").all<{record_json:string}>(),
+          env.DB.prepare('SELECT record_json FROM exams ORDER BY created_at DESC LIMIT 1000').all<{record_json:string}>(),
+          env.DB.prepare('SELECT record_json FROM archived_exams ORDER BY archived_at DESC LIMIT 1000').all<{record_json:string}>(),
+          env.DB.prepare('SELECT record_json FROM notifications ORDER BY created_at DESC LIMIT 500').all<{record_json:string}>(),
+          env.DB.prepare('SELECT record_json FROM audit_logs ORDER BY timestamp DESC LIMIT 150').all<{record_json:string}>()
+        ]);
+        const parse=(rows:{record_json:string}[])=>rows.flatMap(row=>{try{return [JSON.parse(row.record_json) as Record<string,unknown>]}catch{return[]}});
+        const allUsers=parse(users.results||[]),pending=parse(requests.results||[]),allExams=parse(exams.results||[]),allArchive=parse(archive.results||[]),allNotifications=parse(notifications.results||[]),audit=parse(logs.results||[]);
+        const unread=allNotifications.filter(n=>!(Array.isArray(n.readBy)?n.readBy.map(String):[]).includes(String(auth.user.id)));
+        const security=audit.filter(l=>l.category==='SECURITY'||['HIGH','CRITICAL'].includes(String(l.severity)));
+        return json({summary:{pendingRegistrations:pending.length,unreadNotifications:unread.length,totalUsers:allUsers.length,
+          activeUsers:allUsers.filter(u=>(u.status||'ACTIVE')==='ACTIVE').length,suspendedUsers:allUsers.filter(u=>u.status==='SUSPENDED').length,
+          teachersCount:allUsers.filter(u=>u.role==='Teacher').length,schoolAdminsCount:allUsers.filter(u=>u.role==='SchoolAdmin').length,
+          totalExams:allExams.length,archivedExams:allArchive.length,securityAlertsCount:security.length,
+          criticalAlertsCount:audit.filter(l=>l.severity==='CRITICAL').length},
+          pendingRequestsList:pending,
+          usersOverview:allUsers.map(u=>{const {passwordHash:_hash,authVersion:_version,...safe}=u;return {...safe,examsCount:allExams.filter(e=>(e.ownerId||e.createdBy)===u.id).length}}),
+          recentSecurityAlerts:security.slice(0,25),
+          recentExamsActivity:allExams.slice(0,15).map(e=>({id:e.id,title:e.title,titleAr:e.titleAr,code:e.code,status:e.status,grade:e.grade,createdAt:e.createdAt,createdByName:e.createdByName})),
+          auditIntegrity:{valid:false,chainedCount:0,legacyCount:audit.length,brokenEntryIds:[]},
+          storageStatus:{database:'D1',r2Configured:Boolean(env.QUESTION_IMAGES)}});
+      } catch(e) {console.error('Owner control center failed',e);return json({error:'Control center unavailable'},500);}
+    }
+    if (url.pathname==='/api/worker/owner/audit-logs' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      if (String(auth.user.role)!=='PlatformOwner') return json({error:'FORBIDDEN'},403);
+      const category=url.searchParams.get('category')||'',severity=url.searchParams.get('severity')||'',userId=url.searchParams.get('userId')||'';
+      const search=(url.searchParams.get('search')||'').toLowerCase(),limit=Math.min(1000,Math.max(1,Number(url.searchParams.get('limit'))||200));
+      const r=await env.DB.prepare('SELECT record_json FROM audit_logs ORDER BY timestamp DESC LIMIT 2000').all<{record_json:string}>();
+      if (!r.success) return json({error:'Audit log unavailable'},503);
+      const logs=(r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json) as Record<string,unknown>]}catch{return[]}})
+        .filter(log=>(!category||log.category===category)&&(!severity||log.severity===severity)&&(!userId||log.userId===userId)&&
+          (!search||JSON.stringify(log).toLowerCase().includes(search))).slice(0,limit);
+      return json({logs,integrity:{valid:logs.length===0,chainedCount:0,legacyCount:logs.length,brokenEntryIds:[]}});
+    }
+    if (url.pathname==='/api/worker/owner/audit-logs/export' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      if (String(auth.user.role)!=='PlatformOwner') return json({error:'FORBIDDEN'},403);
+      const r=await env.DB.prepare('SELECT record_json FROM audit_logs ORDER BY timestamp DESC LIMIT 5000').all<{record_json:string}>();
+      if (!r.success) return json({error:'Audit log unavailable'},503);
+      const logs=(r.results||[]).flatMap(row=>{try{return [JSON.parse(row.record_json) as Record<string,unknown>]}catch{return[]}});
+      if (url.searchParams.get('format')==='csv') {
+        const keys=['id','timestamp','userId','actorName','actorRole','category','severity','action','result','ipAddress','details'];
+        const quote=(v:unknown)=>'"'+String(v??'').replace(/"/g,'""')+'"';
+        const csv=[keys.join(','),...logs.map(log=>keys.map(key=>quote(log[key])).join(','))].join('\n');
+        return new Response('\uFEFF'+csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="qaflah-audit-log.csv"','Cache-Control':'private, no-store'}});
+      }
+      return new Response(JSON.stringify({exportedAt:new Date().toISOString(),logs},null,2),{headers:{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="qaflah-audit-log.json"','Cache-Control':'private, no-store'}});
+    }
+
+    if (url.pathname==='/api/worker/auth/reset-password' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      const body:unknown=await request.json().catch(()=>null);
+      if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid password reset request'},400);
+      const input=body as Record<string,unknown>,targetId=typeof input.userId==='string'?input.userId:'',password=typeof input.newPassword==='string'?input.newPassword:'';
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(targetId)||password.length<8||password.length>128) return json({error:'Password must be 8 to 128 characters'},400);
+      const actor=auth.user as Record<string,unknown>;
+      const target=await new D1UserRepository(env.DB).findPublicById(targetId);
+      if (!target) return json({error:'USER_NOT_FOUND'},404);
+      const self=String(actor.id)===targetId,owner=String(actor.role)==='PlatformOwner';
+      const schoolAdmin=String(actor.role)==='SchoolAdmin'&&String(target.role)==='Teacher';
+      if (!self&&!owner&&!schoolAdmin) return json({error:'FORBIDDEN'},403);
+      const hash=await bcrypt.hash(password,10);
+      const updated=await new D1UserRepository(env.DB).setPasswordHash(targetId,hash);
+      return updated?json({success:true,message:'Password updated'}):json({error:'PASSWORD_UPDATE_FAILED'},404);
+    }
+    if (url.pathname==='/api/worker/auth/switch-user' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+      if (!auth.ok) return json({error:auth.error},auth.status);
+      if (String(auth.user.role)!=='PlatformOwner') return json({error:'FORBIDDEN'},403);
+      const body:unknown=await request.json().catch(()=>null);
+      const targetId=body&&typeof body==='object'&&typeof (body as Record<string,unknown>).userId==='string'?String((body as Record<string,unknown>).userId):'';
+      const target=await new D1UserRepository(env.DB).findPublicById(targetId);
+      if (!target||target.status!=='ACTIVE') return json({error:'USER_NOT_FOUND_OR_INACTIVE'},404);
+      const token=await signWorkerAuthToken({id:target.id,role:target.role},env.SESSION_SECRET,new D1AuthVersionReader(env.DB));
+      return json({success:true,token,user:target});
     }
 
     if (url.pathname==='/api/worker/system/audit-logs' && request.method==='GET') {
