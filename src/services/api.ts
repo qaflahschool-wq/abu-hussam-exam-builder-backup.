@@ -151,7 +151,7 @@ class ApiService {
   }
 
   async updateSchoolIdentity(patch: Partial<SchoolIdentitySettings>): Promise<{ success: boolean; settings: SchoolIdentitySettings }> {
-    return this.request('/api/school/identity', {
+    return this.request('/api/worker/school/identity', {
       method: 'PUT',
       body: JSON.stringify(patch),
     });
@@ -234,17 +234,17 @@ class ApiService {
 
   // Notifications (Role-scoped)
   async getNotifications(): Promise<{ notifications: NotificationItem[]; unreadCount: number }> {
-    return this.request('/api/notifications');
+    return this.request('/api/worker/notifications');
   }
 
   async markNotificationRead(id: string): Promise<{ success: boolean }> {
-    return this.request(`/api/notifications/${id}/read`, {
+    return this.request(`/api/worker/notifications/${encodeURIComponent(id)}/read`, {
       method: 'POST',
     });
   }
 
   async markAllNotificationsRead(): Promise<{ success: boolean; updatedCount: number }> {
-    return this.request('/api/notifications/read-all', {
+    return this.request('/api/worker/notifications/read-all', {
       method: 'POST',
     });
   }
@@ -256,14 +256,14 @@ class ApiService {
   }
 
   async createSubject(subject: Partial<Subject>): Promise<{ success: boolean; subject: Subject }> {
-    return this.request('/api/subjects', {
+    return this.request('/api/worker/catalog/subjects', {
       method: 'POST',
       body: JSON.stringify(subject),
     });
   }
 
   async updateSubject(id: string, subject: Partial<Subject>): Promise<{ success: boolean; subject: Subject }> {
-    return this.request(`/api/subjects/${id}`, {
+    return this.request(`/api/worker/catalog/subjects/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(subject),
     });
@@ -286,18 +286,18 @@ class ApiService {
     if (grade) params.set('grade', grade);
     if (subjectId) params.set('subjectId', subjectId);
     const q = params.toString() ? `?${params.toString()}` : '';
-    return this.request(`/api/curricula${q}`);
+    return this.request(`/api/worker/curricula${q}`);
   }
 
   async addUnit(unit: Partial<CurriculumUnit>): Promise<{ success: boolean; unit: CurriculumUnit }> {
-    return this.request('/api/curricula/unit', {
+    return this.request('/api/worker/curricula/unit', {
       method: 'POST',
       body: JSON.stringify(unit),
     });
   }
 
   async updateUnit(id: string, unit: Partial<CurriculumUnit>): Promise<{ success: boolean; unit: CurriculumUnit }> {
-    return this.request(`/api/curricula/unit/${id}`, {
+    return this.request(`/api/worker/curricula/unit/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(unit),
     });
