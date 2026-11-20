@@ -52,7 +52,7 @@ export class WorkerAuthService {
       'RETURNING attempts'
     ).bind(key, now, windowMs, now, windowMs, now, now).first<{ attempts: number }>();
     if (!row) throw new Error('Rate limit state could not be updated');
-    return Math.max(0, limit - Number(row.attempts));
+    return limit - Number(row.attempts);
   }
 
   async register(body: unknown, ip: string, userAgent: string): Promise<AuthServiceResult> {
