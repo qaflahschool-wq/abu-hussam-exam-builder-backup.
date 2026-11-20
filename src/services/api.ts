@@ -799,14 +799,14 @@ class ApiService {
   }
 
   async restoreBackup(filename: string): Promise<{ success: boolean }> {
-    return this.request('/api/system/restore', {
+    return this.request('/api/worker/system/restore', {
       method: 'POST',
       body: JSON.stringify({ filename }),
     });
   }
 
   async restoreBackupFromUpload(content: string): Promise<{ success: boolean }> {
-    return this.request('/api/system/restore-upload', {
+    return this.request('/api/worker/system/restore-upload', {
       method: 'POST',
       body: JSON.stringify({ content }),
     });
