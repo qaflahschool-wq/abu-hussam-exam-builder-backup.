@@ -60,7 +60,7 @@ function createImageMocks() {
 
 test('uploads a supported image to R2 and persists ownership metadata in D1', async () => {
   const mocks = createImageMocks();
-  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const metadata = await mocks.storage.upload({
     ownerId: 'owner-1',
     questionId: 'question-1',
@@ -83,9 +83,24 @@ test('rejects unsupported formats before writing to R2', async () => {
       ownerId: 'owner-1',
       questionId: 'question-1',
       contentType: 'image/svg+xml',
-      bytes: new Uint8Array([1]),
+      bytes: new Uint8Array([0xff, 0xd8, 0xff, 0x00]),
     }),
     /Unsupported image type/
+  );
+  assert.equal(mocks.objects.size, 0);
+});
+
+
+test('rejects content whose file signature does not match its declared MIME type', async () => {
+  const mocks = createImageMocks();
+  await assert.rejects(
+    () => mocks.storage.upload({
+      ownerId: 'owner-1',
+      questionId: 'question-1',
+      contentType: 'image/png',
+      bytes: new Uint8Array([0xff, 0xd8, 0xff, 0x00]),
+    }),
+    /does not match/
   );
   assert.equal(mocks.objects.size, 0);
 });
@@ -124,11 +139,11 @@ test('reads only images owned by the authenticated user', async () => {
     ownerId: 'owner-1',
     questionId: 'question-1',
     contentType: 'image/webp',
-    bytes: new Uint8Array([7, 8, 9]),
+    bytes: new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]),
   });
   assert.equal(await mocks.storage.getForOwner(metadata.id, 'another-owner'), null);
   const loaded = await mocks.storage.getForOwner(metadata.id, 'owner-1');
   assert.ok(loaded);
   assert.equal(loaded.contentType, 'image/webp');
-  assert.deepEqual(Array.from(new Uint8Array(loaded.bytes)), [7, 8, 9]);
+  assert.deepEqual(Array.from(new Uint8Array(loaded.bytes)), [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
 });
