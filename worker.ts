@@ -10,6 +10,7 @@ import { DEFAULT_CURRICULA } from './server/cloudflare/defaultCurricula.js';
 interface Env {
   DB: D1Database;
   SESSION_SECRET: string;
+  BOOTSTRAP_TOKEN?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   QUESTION_IMAGES?: R2Bucket;
   BROWSER?: { quickAction(action: 'pdf', options: Record<string, unknown>): Promise<Response> };
@@ -683,6 +684,49 @@ export default {
           hasAIAccess:auth.user.hasAIAccess===true
         });
       } catch(e) { console.error('Worker dashboard stats failed',e); return json({error:'Dashboard statistics unavailable'},500); }
+    }
+
+
+    if (url.pathname==='/api/worker/bootstrap/status' && request.method==='GET') {
+      if (!env.DB) return json({error:'Database unavailable'},503);
+      try {
+        const row=await env.DB.prepare('SELECT COUNT(*) AS total FROM app_users').first<{total:number}>();
+        return json({needsSetup:Number(row?.total||0)===0});
+      } catch(e) { console.error('Bootstrap status check failed',e); return json({error:'Bootstrap status unavailable'},500); }
+    }
+    if (url.pathname==='/api/worker/bootstrap' && request.method==='POST') {
+      if (serviceUnavailable(env)||!env.BOOTSTRAP_TOKEN||env.BOOTSTRAP_TOKEN.length<32) return json({error:'Bootstrap is not configured'},503);
+      try {
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid bootstrap request'},400);
+        const input=body as Record<string,unknown>;
+        const supplied=typeof input.token==='string'?input.token:'';
+        const expectedBytes=new TextEncoder().encode(env.BOOTSTRAP_TOKEN);
+        const suppliedBytes=new TextEncoder().encode(supplied);
+        const expectedHash=new Uint8Array(await crypto.subtle.digest('SHA-256',expectedBytes));
+        const suppliedHash=new Uint8Array(await crypto.subtle.digest('SHA-256',suppliedBytes));
+        let mismatch=expectedHash.length^suppliedHash.length;
+        for(let i=0;i<expectedHash.length;i++) mismatch|=expectedHash[i]^(suppliedHash[i]||0);
+        if (mismatch!==0) return json({error:'Invalid bootstrap token'},403);
+        const count=await env.DB.prepare('SELECT COUNT(*) AS total FROM app_users').first<{total:number}>();
+        if (Number(count?.total||0)!==0) return json({error:'BOOTSTRAP_ALREADY_COMPLETED'},409);
+        const fullName=typeof input.fullName==='string'?input.fullName.trim():'';
+        const username=typeof input.username==='string'?input.username.trim():'';
+        const password=typeof input.password==='string'?input.password:'';
+        if (fullName.length<3||fullName.length>120||!/^[A-Za-z0-9._-]{3,32}$/.test(username)||password.length<12||password.length>128) {
+          return json({error:'Name, username, or password does not meet the requirements'},400);
+        }
+        const now=new Date().toISOString(),id='usr-'+crypto.randomUUID();
+        const user={id,username,name:fullName,role:'PlatformOwner',status:'ACTIVE',hasAIAccess:false,
+          assignedSubjects:['all'],assignedGrades:['all'],
+          delegatedPermissions:{canManageTeachers:true,canManageSubjects:true,canManageIdentity:true,canManageCurricula:true},
+          createdAt:now,passwordHash:await bcrypt.hash(password,12),authVersion:0};
+        const created=await env.DB.prepare('INSERT INTO app_users (id,username,role,status,record_json,created_at,updated_at) SELECT ?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM app_users)=0')
+          .bind(id,username,'PlatformOwner','ACTIVE',JSON.stringify(user),now,now).run();
+        if (!created.success||Number(created.meta?.changes||0)!==1) return json({error:'BOOTSTRAP_RACE_OR_FAILURE'},409);
+        const {passwordHash:_hash,authVersion:_version,...safe}=user;
+        return json({success:true,user:safe},201);
+      } catch(e) { console.error('Platform owner bootstrap failed',e); return json({error:'Bootstrap failed'},500); }
     }
 
     if (url.pathname === '/api/worker/health' && request.method === 'GET') {
