@@ -285,6 +285,192 @@ export default {
       }
     }
 
+
+    // D1-backed subject catalog administration.
+    if (url.pathname.startsWith('/api/worker/catalog/subjects') &&
+        ['POST','PUT','DELETE'].includes(request.method)) {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const actor=auth.user as Record<string,unknown>;
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(actor.role))) return json({error:'FORBIDDEN'},403);
+        const tail=url.pathname.slice('/api/worker/catalog/subjects'.length).replace(/^\/+/,'');
+        if (request.method==='POST' && !tail) {
+          const body:unknown=await request.json().catch(()=>null);
+          if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid subject'},400);
+          const input=body as Record<string,unknown>;
+          if (typeof input.nameAr!=='string'||!input.nameAr.trim()||typeof input.nameEn!=='string'||!input.nameEn.trim()) return json({error:'Subject names are required'},400);
+          const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'subj-'+crypto.randomUUID();
+          const subject={...input,id,code:typeof input.code==='string'?input.code:String(input.nameEn).slice(0,3).toUpperCase(),
+            defaultDirection:input.defaultDirection==='ltr'?'ltr':'rtl',isActive:input.isActive!==false,
+            sortOrder:Number.isFinite(Number(input.sortOrder))?Number(input.sortOrder):99,createdAt:new Date().toISOString()};
+          const result=await env.DB.prepare('INSERT INTO subjects (id,is_active,sort_order,record_json) VALUES (?,?,?,?)')
+            .bind(id,subject.isActive?1:0,subject.sortOrder,JSON.stringify(subject)).run();
+          return result.success?json({success:true,subject}):json({error:'SUBJECT_SAVE_FAILED'},503);
+        }
+        const id=tail.split('/')[0];
+        if (!id||! /^[A-Za-z0-9_-]{1,128}$/.test(id)) return json({error:'Invalid subject id'},400);
+        const row=await env.DB.prepare('SELECT record_json FROM subjects WHERE id=? LIMIT 1').bind(id).first<{record_json:string}>();
+        if (!row) return json({error:'SUBJECT_NOT_FOUND'},404);
+        const existing=JSON.parse(row.record_json) as Record<string,unknown>;
+        if (request.method==='DELETE') {
+          if (['subj-quran','subj-isl','subj-ar','subj-sci','subj-soc','subj-en'].includes(id)) return json({error:'CORE_SUBJECT_CANNOT_BE_DELETED'},400);
+          const removed=await env.DB.prepare('DELETE FROM subjects WHERE id=?').bind(id).run();
+          return removed.success?json({success:true}):json({error:'SUBJECT_DELETE_FAILED'},503);
+        }
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid subject update'},400);
+        const patch=body as Record<string,unknown>;
+        const {id:_id,...safe}=patch;
+        const updated={...existing,...safe,id,isActive:safe.isActive===undefined?existing.isActive:safe.isActive!==false,
+          sortOrder:safe.sortOrder===undefined?existing.sortOrder:Number(safe.sortOrder)};
+        const saved=await env.DB.prepare('UPDATE subjects SET is_active=?,sort_order=?,record_json=? WHERE id=?')
+          .bind(updated.isActive?1:0,Number(updated.sortOrder)||99,JSON.stringify(updated),id).run();
+        return saved.success?json({success:true,subject:updated}):json({error:'SUBJECT_UPDATE_FAILED'},503);
+      } catch(e) { console.error('Worker subject mutation failed',e); return json({error:'Subject operation failed'},500); }
+    }
+
+    // Curriculum units are stored as complete JSON records, retaining lesson structures.
+    const curriculumCollection='/api/worker/curricula';
+    const curriculumPrefix='/api/worker/curricula/unit/';
+    if (url.pathname===curriculumCollection && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const grade=url.searchParams.get('grade')||'', subjectId=url.searchParams.get('subjectId')||'';
+        const user=auth.user as Record<string,unknown>;
+        const admin=['PlatformOwner','Administrator','SchoolAdmin'].includes(String(user.role));
+        const grades=Array.isArray(user.assignedGrades)?user.assignedGrades.map(String):[];
+        const subjects=Array.isArray(user.assignedSubjects)?user.assignedSubjects.map(String):[];
+        if ((grade&& !admin && !(grades.includes('all')||grades.includes(grade))) ||
+            (subjectId&& !admin && !(subjects.includes('all')||subjects.includes(subjectId)))) return json({error:'FORBIDDEN_ACADEMIC_SCOPE'},403);
+        const r=await env.DB.prepare('SELECT record_json FROM curricula ORDER BY grade, subject_id, id').all<{record_json:string}>();
+        if (!r.success) return json({error:'Curriculum unavailable'},503);
+        const list=(r.results||[]).flatMap(row=>{try{const v=JSON.parse(row.record_json) as Record<string,unknown>;
+          if (grade&&v.grade!==grade) return [];
+          if (subjectId&&String(v.subjectId||'subj-en')!==subjectId) return [];
+          if (!admin && (!(grades.includes('all')||grades.includes(String(v.grade||''))) ||
+              !(subjects.includes('all')||subjects.includes(String(v.subjectId||'subj-en'))))) return [];
+          return [v];}catch{return[]}});
+        return json(list);
+      } catch(e) { console.error('Worker curricula read failed',e); return json({error:'Curriculum unavailable'},500); }
+    }
+    if (url.pathname===curriculumCollection+'/unit' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(auth.user.role))) return json({error:'FORBIDDEN'},403);
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid curriculum unit'},400);
+        const input=body as Record<string,unknown>;
+        if (typeof input.title!=='string'||!input.title.trim()||typeof input.grade!=='string'||!input.grade.trim()) return json({error:'Title and grade are required'},400);
+        const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'unit-'+crypto.randomUUID();
+        const unit={...input,id,lessons:Array.isArray(input.lessons)?input.lessons:[]};
+        const r=await env.DB.prepare('INSERT INTO curricula (id,grade,subject_id,record_json) VALUES (?,?,?,?)')
+          .bind(id,String(unit.grade),String(unit.subjectId||'subj-en'),JSON.stringify(unit)).run();
+        return r.success?json({success:true,unit}):json({error:'CURRICULUM_SAVE_FAILED'},503);
+      } catch(e) { console.error('Worker curriculum create failed',e); return json({error:'Curriculum save failed'},500); }
+    }
+    const curriculumId= url.pathname.startsWith(curriculumPrefix)?url.pathname.slice(curriculumPrefix.length):'';
+    if (curriculumId && /^[A-Za-z0-9_-]{1,128}$/.test(curriculumId) && ['PUT','DELETE'].includes(request.method)) {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(auth.user.role))) return json({error:'FORBIDDEN'},403);
+        const row=await env.DB.prepare('SELECT record_json FROM curricula WHERE id=? LIMIT 1').bind(curriculumId).first<{record_json:string}>();
+        if (!row) return json({error:'CURRICULUM_NOT_FOUND'},404);
+        if (request.method==='DELETE') {
+          const d=await env.DB.prepare('DELETE FROM curricula WHERE id=?').bind(curriculumId).run();
+          return d.success?json({success:true}):json({error:'CURRICULUM_DELETE_FAILED'},503);
+        }
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid curriculum update'},400);
+        const current=JSON.parse(row.record_json) as Record<string,unknown>;
+        const patch=body as Record<string,unknown>;
+        const {id:_id,...safe}=patch;
+        const next={...current,...safe,id:curriculumId};
+        if (typeof next.grade!=='string'||!next.grade.trim()) return json({error:'Invalid curriculum grade'},400);
+        const u=await env.DB.prepare('UPDATE curricula SET grade=?,subject_id=?,record_json=? WHERE id=?')
+          .bind(String(next.grade),String(next.subjectId||'subj-en'),JSON.stringify(next),curriculumId).run();
+        return u.success?json({success:true,unit:next}):json({error:'CURRICULUM_UPDATE_FAILED'},503);
+      } catch(e) { console.error('Worker curriculum mutation failed',e); return json({error:'Curriculum operation failed'},500); }
+    }
+
+    // User-scoped notification reads and read-state updates.
+    if (url.pathname==='/api/worker/notifications' && request.method==='GET') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const r=await env.DB.prepare('SELECT id,record_json FROM notifications WHERE user_id=? OR user_id IS NULL ORDER BY created_at DESC LIMIT 200')
+          .bind(auth.user.id).all<{id:string;record_json:string}>();
+        if (!r.success) return json({error:'Notifications unavailable'},503);
+        const list=(r.results||[]).flatMap(row=>{try{const n=JSON.parse(row.record_json) as Record<string,unknown>;
+          const readBy=Array.isArray(n.readBy)?n.readBy.map(String):[];
+          return [{...n,readBy}];}catch{return[]}});
+        return json({notifications:list,unreadCount:list.filter(n=>!(n.readBy as string[]).includes(auth.user.id)).length});
+      } catch(e) { console.error('Worker notifications read failed',e); return json({error:'Notifications unavailable'},500); }
+    }
+    const notificationReadMatch=url.pathname.match(/^\/api\/worker\/notifications\/([A-Za-z0-9_-]{1,128})\/read$/);
+    if (notificationReadMatch && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const id=notificationReadMatch[1];
+        const row=await env.DB.prepare('SELECT record_json FROM notifications WHERE id=? AND (user_id=? OR user_id IS NULL) LIMIT 1')
+          .bind(id,auth.user.id).first<{record_json:string}>();
+        if (!row) return json({error:'NOTIFICATION_NOT_FOUND'},404);
+        const n=JSON.parse(row.record_json) as Record<string,unknown>;
+        const readBy=Array.isArray(n.readBy)?n.readBy.map(String):[];
+        if (!readBy.includes(auth.user.id)) readBy.push(auth.user.id);
+        n.readBy=readBy;
+        const u=await env.DB.prepare('UPDATE notifications SET record_json=? WHERE id=?').bind(JSON.stringify(n),id).run();
+        return u.success?json({success:true}):json({error:'NOTIFICATION_UPDATE_FAILED'},503);
+      } catch(e) { console.error('Worker notification read update failed',e); return json({error:'Notification update failed'},500); }
+    }
+    if (url.pathname==='/api/worker/notifications/read-all' && request.method==='POST') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const r=await env.DB.prepare('SELECT id,record_json FROM notifications WHERE user_id=? OR user_id IS NULL ORDER BY created_at DESC LIMIT 200')
+          .bind(auth.user.id).all<{id:string;record_json:string}>();
+        let updatedCount=0;
+        for (const row of r.results||[]) {
+          try {const n=JSON.parse(row.record_json) as Record<string,unknown>;const reads=Array.isArray(n.readBy)?n.readBy.map(String):[];
+            if (!reads.includes(auth.user.id)) {reads.push(auth.user.id);n.readBy=reads;
+              const u=await env.DB.prepare('UPDATE notifications SET record_json=? WHERE id=?').bind(JSON.stringify(n),row.id).run();
+              if (u.success) updatedCount++;}}
+          catch {/* Ignore malformed notification and continue. */}
+        }
+        return json({success:true,updatedCount});
+      } catch(e) { console.error('Worker mark all notifications failed',e); return json({error:'Notifications unavailable'},500); }
+    }
+
+    if (url.pathname==='/api/worker/school/identity' && request.method==='PUT') {
+      if (serviceUnavailable(env)) return json({error:'Service unavailable'},503);
+      try {
+        const auth=await authenticateWorkerRequest(request,env.SESSION_SECRET,new D1AuthVersionReader(env.DB),new D1UserRepository(env.DB));
+        if (!auth.ok) return json({error:auth.error},auth.status);
+        const actor=auth.user as Record<string,unknown>;
+        if (!['PlatformOwner','Administrator','SchoolAdmin'].includes(String(actor.role))) return json({error:'FORBIDDEN'},403);
+        const body:unknown=await request.json().catch(()=>null);
+        if (!body||typeof body!=='object'||Array.isArray(body)) return json({error:'Invalid school identity'},400);
+        const current=await env.DB.prepare('SELECT record_json FROM school_settings WHERE singleton_id=1').first<{record_json:string}>();
+        const old=current?JSON.parse(current.record_json) as Record<string,unknown>:{};
+        const patch=body as Record<string,unknown>;
+        const next={...old,...patch,updatedAt:new Date().toISOString()};
+        const saved=await env.DB.prepare('INSERT INTO school_settings (singleton_id,record_json,updated_at) VALUES (1,?,?) ON CONFLICT(singleton_id) DO UPDATE SET record_json=excluded.record_json,updated_at=excluded.updated_at')
+          .bind(JSON.stringify(next),String(next.updatedAt)).run();
+        return saved.success?json({success:true,settings:next}):json({error:'SCHOOL_IDENTITY_SAVE_FAILED'},503);
+      } catch(e) { console.error('Worker school identity update failed',e); return json({error:'School identity update failed'},500); }
+    }
+
     if (url.pathname === '/api/worker/school/identity' && request.method === 'GET') {
       if (!env.DB) return json({ error: 'School identity unavailable' }, 503);
       try {
