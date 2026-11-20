@@ -343,21 +343,21 @@ class ApiService {
   }
 
   async addQuestion(question: Partial<Question>): Promise<{ success: boolean; question: Question }> {
-    return this.request('/api/questions', {
+    return this.request('/api/worker/questions', {
       method: 'POST',
       body: JSON.stringify(question),
     });
   }
 
   async updateQuestion(id: string, question: Partial<Question>): Promise<{ success: boolean; question: Question }> {
-    return this.request(`/api/questions/${id}`, {
+    return this.request(`/api/worker/questions/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(question),
     });
   }
 
   async deleteQuestion(id: string): Promise<{ success: boolean }> {
-    return this.request(`/api/questions/${id}`, {
+    return this.request(`/api/worker/questions/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
