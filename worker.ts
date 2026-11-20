@@ -13,6 +13,7 @@ interface Env {
   SESSION_SECRET: string;
   BOOTSTRAP_TOKEN?: string;
   GEMINI_API_KEY?: string;
+  FRONTEND_ORIGIN?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   QUESTION_IMAGES?: R2Bucket;
   BROWSER?: { quickAction(action: 'pdf', options: Record<string, unknown>): Promise<Response> };
@@ -92,6 +93,10 @@ export default {
 
     if (!url.pathname.startsWith('/api/') && env.ASSETS) {
       return env.ASSETS.fetch(request);
+    }
+    if (!url.pathname.startsWith('/api/') && env.FRONTEND_ORIGIN) {
+      const frontendUrl = new URL(url.pathname + url.search, env.FRONTEND_ORIGIN);
+      return fetch(new Request(frontendUrl, request));
     }
 
 
