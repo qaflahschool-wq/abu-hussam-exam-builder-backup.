@@ -368,7 +368,7 @@ export default {
         const input=body as Record<string,unknown>;
         if (typeof input.title!=='string'||!input.title.trim()||typeof input.grade!=='string'||!input.grade.trim()) return json({error:'Title and grade are required'},400);
         const id=typeof input.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(input.id)?input.id:'unit-'+crypto.randomUUID();
-        const unit={...input,id,lessons:Array.isArray(input.lessons)?input.lessons:[]};
+        const unit: Record<string,unknown>={...input,id,lessons:Array.isArray(input.lessons)?input.lessons:[]};
         const r=await env.DB.prepare('INSERT INTO curricula (id,grade,subject_id,record_json) VALUES (?,?,?,?)')
           .bind(id,String(unit.grade),String(unit.subjectId||'subj-en'),JSON.stringify(unit)).run();
         return r.success?json({success:true,unit}):json({error:'CURRICULUM_SAVE_FAILED'},503);
@@ -392,10 +392,12 @@ export default {
         const current=JSON.parse(row.record_json) as Record<string,unknown>;
         const patch=body as Record<string,unknown>;
         const {id:_id,...safe}=patch;
-        const next={...current,...safe,id:curriculumId};
-        if (typeof next.grade!=='string'||!next.grade.trim()) return json({error:'Invalid curriculum grade'},400);
+        const next: Record<string,unknown>={...current,...safe,id:curriculumId};
+        const nextGrade=typeof next.grade==='string'?next.grade:'';
+        const nextSubject=typeof next.subjectId==='string'&&next.subjectId?next.subjectId:'subj-en';
+        if (!nextGrade.trim()) return json({error:'Invalid curriculum grade'},400);
         const u=await env.DB.prepare('UPDATE curricula SET grade=?,subject_id=?,record_json=? WHERE id=?')
-          .bind(String(next.grade),String(next.subjectId||'subj-en'),JSON.stringify(next),curriculumId).run();
+          .bind(nextGrade,nextSubject,JSON.stringify(next),curriculumId).run();
         return u.success?json({success:true,unit:next}):json({error:'CURRICULUM_UPDATE_FAILED'},503);
       } catch(e) { console.error('Worker curriculum mutation failed',e); return json({error:'Curriculum operation failed'},500); }
     }
