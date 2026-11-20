@@ -519,3 +519,122 @@ test('Worker question bank returns only the authenticated owner and assigned aca
   const questions = await response.json() as Array<{ id: string }>;
   assert.deepEqual(questions.map((item) => item.id), ['q-owned']);
 });
+
+
+test('Worker lists archived exams only for the authenticated owner', async () => {
+  const owner = { id: 'archive-owner', username: 'archive.owner', role: 'Teacher', status: 'ACTIVE', name: 'Archive Owner', authVersion: 0 };
+  const archived = { id: 'exam-archived-1', ownerId: owner.id, grade: 'Grade 7', subjectId: 'subj-en', status: 'Archived', title: 'Archived test' };
+  const token = await signWorkerAuthToken({ id: owner.id, role: owner.role }, SECRET, { getAuthVersion: async () => 0 }, 3600);
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+              if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(owner) } as T;
+              return null;
+            },
+            async all<T>() {
+              if (sql.includes('FROM archived_exams WHERE owner_id = ?')) {
+                assert.equal(values[0], owner.id);
+                return { success: true, results: [{ record_json: JSON.stringify(archived) }] as T[] };
+              }
+              return { success: true, results: [] as T[] };
+            },
+            async run() { return { success: true, meta: { changes: 1 } }; },
+          };
+        },
+      };
+    },
+  };
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/archive', { headers: { authorization: `Bearer ${token}` } }),
+    { DB: db as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), [archived]);
+});
+
+test('Worker restores an archived exam to the authenticated owner workspace', async () => {
+  const owner = { id: 'restore-owner', username: 'restore.owner', role: 'Teacher', status: 'ACTIVE', name: 'Restore Owner', authVersion: 0 };
+  const archived = { id: 'exam-restore-1', ownerId: owner.id, grade: 'Grade 7', subjectId: 'subj-en', status: 'Archived', title: 'Restore test', createdAt: '2026-11-20T00:00:00.000Z' };
+  const token = await signWorkerAuthToken({ id: owner.id, role: owner.role }, SECRET, { getAuthVersion: async () => 0 }, 3600);
+  const writes: string[] = [];
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(..._values: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+              if (sql.includes('FROM app_users WHERE id =')) return { record_json: JSON.stringify(owner) } as T;
+              if (sql.includes('FROM archived_exams WHERE id=')) return { record_json: JSON.stringify(archived) } as T;
+              return null;
+            },
+            async all<T>() { return { success: true, results: [] as T[] }; },
+            async run() { writes.push(sql); return { success: true, meta: { changes: 1 } }; },
+          };
+        },
+      };
+    },
+  };
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/archive/exam-restore-1/restore', {
+      method: 'POST', headers: { authorization: `Bearer ${token}` },
+    }),
+    { DB: db as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { success: true });
+  assert.equal(writes.some(sql => sql.startsWith('INSERT INTO exams')), true);
+  assert.equal(writes.some(sql => sql.startsWith('DELETE FROM archived_exams')), true);
+});
+
+test('Worker exam sharing is owner-only and stores explicit permission', async () => {
+  const owner = { id: 'share-owner', username: 'share.owner', role: 'Teacher', status: 'ACTIVE', name: 'Share Owner', authVersion: 0 };
+  const target = { id: 'share-target', username: 'share.target', role: 'Teacher', status: 'ACTIVE', name: 'Share Target', assignedGrades: ['Grade 7'], assignedSubjects: ['subj-en'], authVersion: 0 };
+  const exam = { id: 'exam-share-1', ownerId: owner.id, grade: 'Grade 7', subjectId: 'subj-en', status: 'Draft', sharedWith: [] };
+  const token = await signWorkerAuthToken({ id: owner.id, role: owner.role }, SECRET, { getAuthVersion: async () => 0 }, 3600);
+  let updatedRecord = '';
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.includes("json_extract(record_json, '$.authVersion')")) return { auth_version: 0 } as T;
+              if (sql.includes('FROM app_users WHERE id =')) {
+                const id = values[0];
+                const userRecord = id === target.id ? target : owner;
+                return { record_json: JSON.stringify(userRecord) } as T;
+              }
+              if (sql.includes('FROM exams WHERE id=? AND owner_id=?')) {
+                return { record_json: JSON.stringify(exam) } as T;
+              }
+              return null;
+            },
+            async all<T>() { return { success: true, results: [] as T[] }; },
+            async run() {
+              if (sql.startsWith('UPDATE exams SET record_json')) updatedRecord = String(values[0]);
+              return { success: true, meta: { changes: 1 } };
+            },
+          };
+        },
+      };
+    },
+  };
+  const response = await worker.fetch(
+    new Request('https://worker.test/api/worker/exams/exam-share-1/share', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ targetUserId: target.id, permission: 'view' }),
+    }),
+    { DB: db as never, SESSION_SECRET: SECRET },
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as { exam: { sharedWith: Array<{ userId: string; permission: string }> } };
+  assert.equal(body.exam.sharedWith[0].userId, target.id);
+  assert.equal(body.exam.sharedWith[0].permission, 'view');
+  assert.equal(JSON.parse(updatedRecord).sharingEnabled, true);
+});
