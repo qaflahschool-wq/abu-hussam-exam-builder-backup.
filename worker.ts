@@ -96,7 +96,7 @@ export default {
     const id = 'usr-' + crypto.randomUUID();
     const username = env.INITIAL_OWNER_USERNAME || 'abuhussam';
     const user = {
-      id, username, name: 'مدير المنظومة', role: 'PlatformOwner', status: 'ACTIVE', hasAIAccess: false,
+      id, username, name: 'مدير المنظومة', role: 'PlatformOwner', status: 'ACTIVE', hasAIAccess: true,
       assignedSubjects: ['all'], assignedGrades: ['all'],
       delegatedPermissions: { canManageTeachers: true, canManageSubjects: true, canManageIdentity: true, canManageCurricula: true },
       school: 'مدرسة قفلة للتعليم الأساسي', createdAt: now,
@@ -1558,7 +1558,7 @@ export default {
           return json({error:'Name, username, or password does not meet the requirements'},400);
         }
         const now=new Date().toISOString(),id='usr-'+crypto.randomUUID();
-        const user={id,username,name:fullName,role:'PlatformOwner',status:'ACTIVE',hasAIAccess:false,
+        const user={id,username,name:fullName,role:'PlatformOwner',status:'ACTIVE',hasAIAccess:true,
           assignedSubjects:['all'],assignedGrades:['all'],
           delegatedPermissions:{canManageTeachers:true,canManageSubjects:true,canManageIdentity:true,canManageCurricula:true},
           createdAt:now,passwordHash:await bcrypt.hash(password,12),authVersion:0};
