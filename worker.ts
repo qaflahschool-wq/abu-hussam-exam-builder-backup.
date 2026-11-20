@@ -139,7 +139,9 @@ export default {
     }
 
 
-    const questionItemMatch = url.pathname.match(new RegExp('^/api/worker/questions/([A-Za-z0-9_-]{1,128})
+    const questionItemPathPrefix = '/api/worker/questions/';
+    const questionItemId = url.pathname.startsWith(questionItemPathPrefix) ? url.pathname.slice(questionItemPathPrefix.length) : '';
+    const questionItemMatch = /^[A-Za-z0-9_-]{1,128}$/.test(questionItemId) ? questionItemId : null;
     if ((url.pathname === '/api/worker/questions' && request.method === 'POST') ||
         (questionItemMatch && (request.method === 'PUT' || request.method === 'DELETE'))) {
       if (serviceUnavailable(env)) return json({ error: 'Service unavailable' }, 503);
@@ -196,7 +198,7 @@ export default {
           return json({ success: true, question });
         }
 
-        const questionId = questionItemMatch?.[1] || '';
+        const questionId = questionItemMatch || '';
         const row = await env.DB.prepare('SELECT record_json FROM questions WHERE id = ? LIMIT 1')
           .bind(questionId).first<{ record_json: string }>();
         if (!row) return json({ error: 'QUESTION_NOT_FOUND' }, 404);
