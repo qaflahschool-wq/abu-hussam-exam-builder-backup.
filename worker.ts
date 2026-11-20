@@ -4,6 +4,7 @@ import { WorkerAuthService } from './server/cloudflare/workerAuthService.js';
 import { authenticateWorkerRequest } from './server/cloudflare/workerAuthGuard.js';
 import { QuestionImageStorage, type R2Bucket } from './server/cloudflare/questionImageStorage.js';
 import { hasValidExamImagePayload } from './server/examImageValidation.js';
+import { DEFAULT_CURRICULA } from './server/cloudflare/defaultCurricula.js';
 
 interface Env {
   DB: D1Database;
@@ -346,6 +347,14 @@ export default {
         const subjects=Array.isArray(user.assignedSubjects)?user.assignedSubjects.map(String):[];
         if ((grade&& !admin && !(grades.includes('all')||grades.includes(grade))) ||
             (subjectId&& !admin && !(subjects.includes('all')||subjects.includes(subjectId)))) return json({error:'FORBIDDEN_ACADEMIC_SCOPE'},403);
+        const existingCount=await env.DB.prepare('SELECT COUNT(*) AS total FROM curricula').first<{total:number}>();
+        if (Number(existingCount?.total||0)===0) {
+          for (const seedUnit of DEFAULT_CURRICULA) {
+            const unit={...seedUnit,subjectId:typeof seedUnit.subjectId==='string'?seedUnit.subjectId:'subj-en'};
+            await env.DB.prepare('INSERT OR IGNORE INTO curricula (id,grade,subject_id,record_json) VALUES (?,?,?,?)')
+              .bind(String(unit.id),String(unit.grade),String(unit.subjectId),JSON.stringify(unit)).run();
+          }
+        }
         const r=await env.DB.prepare('SELECT record_json FROM curricula ORDER BY grade, subject_id, id').all<{record_json:string}>();
         if (!r.success) return json({error:'Curriculum unavailable'},503);
         const list=(r.results||[]).flatMap(row=>{try{const v=JSON.parse(row.record_json) as Record<string,unknown>;
