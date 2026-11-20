@@ -122,21 +122,55 @@ async function buildPdfHeadStyles(): Promise<string> {
 
 async function buildPdfSheetsHtml(root: HTMLElement): Promise<string> {
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
+
   const clone = root.cloneNode(true) as HTMLElement;
   const sourceImages = Array.from(root.querySelectorAll('img'));
   const clonedImages = Array.from(clone.querySelectorAll('img'));
+
+  // PDF HTML is rendered from a temporary file on the server. Browser-relative and
+  // blob URLs are therefore not reliable there; embed every accessible image as a
+  // data URL before sending the document to the PDF renderer.
   await Promise.all(sourceImages.map(async (image, index) => {
-    await image.decode?.().catch(() => undefined);
-    const source = image.currentSrc || image.src;
-    if (!source.startsWith('blob:')) return;
+    const clonedImage = clonedImages[index];
+    if (!clonedImage) return;
+
+    const source = image.currentSrc || image.src || image.getAttribute('src') || '';
+    clonedImage.removeAttribute('srcset');
+    clonedImage.setAttribute('loading', 'eager');
+    if (!source || /^data:image\//i.test(source)) return;
+
     try {
-      const response = await fetch(source);
-      if (!response.ok) return;
-      clonedImages[index].src = await blobToDataUrl(await response.blob());
-    } catch {
-      // Keep the original source; the PDF renderer will show a missing image if unavailable.
+      const resolved = new URL(source, window.location.href);
+      if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:' && resolved.protocol !== 'blob:') {
+        return;
+      }
+
+      const response = await fetch(
+        resolved.href,
+        resolved.protocol === 'blob:'
+          ? undefined
+          : {
+              credentials: resolved.origin === window.location.origin ? 'same-origin' : 'omit',
+              mode: resolved.origin === window.location.origin ? 'same-origin' : 'cors',
+            }
+      );
+      if (!response.ok) throw new Error(`Image fetch failed (${response.status})`);
+
+      const blob = await response.blob();
+      if (!blob.type.startsWith('image/')) throw new Error('Image response has an invalid content type');
+
+      clonedImage.src = await blobToDataUrl(blob);
+      await clonedImage.decode?.().catch(() => undefined);
+    } catch (error) {
+      // Preserve the original image URL as a best-effort fallback. The export must
+      // not silently substitute or alter the school's configured logo.
+      console.warn('Could not embed an exam image for PDF export', {
+        src: source.slice(0, 180),
+        error,
+      });
     }
   }));
+
   return clone.outerHTML;
 }
 
