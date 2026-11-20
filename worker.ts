@@ -14,6 +14,8 @@ interface Env {
   BOOTSTRAP_TOKEN?: string;
   GEMINI_API_KEY?: string;
   FRONTEND_ORIGIN?: string;
+  INITIAL_OWNER_PASSWORD?: string;
+  INITIAL_OWNER_USERNAME?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   QUESTION_IMAGES?: R2Bucket;
   BROWSER?: { quickAction(action: 'pdf', options: Record<string, unknown>): Promise<Response> };
@@ -85,6 +87,24 @@ function canEditQuestion(user: Record<string, unknown>, question: Record<string,
 }
 
 export default {
+  async scheduled(_event: unknown, env: Env): Promise<void> {
+    if (!env.DB || !env.INITIAL_OWNER_PASSWORD || env.INITIAL_OWNER_PASSWORD.length < 16) return;
+    const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM app_users').first<{ total: number }>();
+    if (Number(count?.total || 0) !== 0) return;
+    const now = new Date().toISOString();
+    const id = 'usr-' + crypto.randomUUID();
+    const username = env.INITIAL_OWNER_USERNAME || 'abuhussam';
+    const user = {
+      id, username, name: 'مدير المنظومة', role: 'PlatformOwner', status: 'ACTIVE', hasAIAccess: false,
+      assignedSubjects: ['all'], assignedGrades: ['all'],
+      delegatedPermissions: { canManageTeachers: true, canManageSubjects: true, canManageIdentity: true, canManageCurricula: true },
+      school: 'مدرسة قفلة للتعليم الأساسي', createdAt: now,
+      passwordHash: await bcrypt.hash(env.INITIAL_OWNER_PASSWORD, 12), authVersion: 0,
+    };
+    await env.DB.prepare('INSERT INTO app_users (id,username,role,status,record_json,created_at,updated_at) SELECT ?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM app_users)=0')
+      .bind(id, username, 'PlatformOwner', 'ACTIVE', JSON.stringify(user), now, now).run();
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') {
