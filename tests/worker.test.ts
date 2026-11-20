@@ -731,3 +731,24 @@ test('Worker creates and decrypts a private encrypted D1 backup in R2', async ()
   assert.ok(Array.isArray(snapshot.tables.app_users));
 });
 
+
+
+test('Worker scheduled bootstrap provisions one owner when D1 is empty', async () => {
+  let users = 0;
+  const db = {
+    prepare(sql: string) {
+      const statement = {
+        bind(..._values: unknown[]) { return statement; },
+        async first<T>() {
+          if (sql.includes('SELECT COUNT(*) AS total FROM app_users')) return { total: users } as T;
+          return null;
+        },
+        async all<T>() { return { success: true, results: [] as T[] }; },
+        async run() { users += 1; return { success: true, meta: { changes: 1 } }; },
+      };
+      return statement;
+    },
+  };
+  await worker.scheduled?.({} as never, { DB: db as never, INITIAL_OWNER_PASSWORD: 'a-long-random-temporary-password' } as never);
+  assert.equal(users, 1);
+});
