@@ -120,8 +120,10 @@ export default {
       if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Method not allowed' }, 405);
       let assetPath = '';
       try { assetPath = decodeURIComponent(url.pathname); } catch { return json({ error: 'Invalid asset path' }, 400); }
-      if (assetPath.includes('..') || assetPath.includes('\\\\') || assetPath.includes('\\0')) return json({ error: 'Invalid asset path' }, 400);
-      assetPath = assetPath === '/' ? 'index.html' : assetPath.replace(/^\\/+/, '');
+      if (assetPath.includes('..') || assetPath.includes('\\') || assetPath.includes(String.fromCharCode(0))) {
+        return json({ error: 'Invalid asset path' }, 400);
+      }
+      assetPath = assetPath === '/' ? 'index.html' : (assetPath.startsWith('/') ? assetPath.slice(1) : assetPath);
       let asset = await env.QUESTION_IMAGES.get('frontend/' + assetPath);
       if (!asset && !assetPath.includes('.')) {
         assetPath = 'index.html';
