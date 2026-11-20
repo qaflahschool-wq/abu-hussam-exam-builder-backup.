@@ -123,6 +123,24 @@ async function buildPdfHeadStyles(): Promise<string> {
 async function buildPdfSheetsHtml(root: HTMLElement): Promise<string> {
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
   const clone = root.cloneNode(true) as HTMLElement;
+  // Export only the actual paginated sheets. Preview/edit visibility classes must
+  // never hide a sheet or introduce a leading blank page in the PDF renderer.
+  clone.classList.remove('hidden');
+  clone.style.display = 'block';
+  const exportSheets = Array.from(clone.querySelectorAll<HTMLElement>('.a4-print-sheet'));
+  if (exportSheets.length === 0) {
+    throw new Error('لم يتم العثور على صفحات الاختبار الجاهزة للتصدير.');
+  }
+  exportSheets.forEach((sheet) => {
+    sheet.classList.remove('hidden');
+    sheet.style.display = 'flex';
+    sheet.style.visibility = 'visible';
+    sheet.style.position = 'relative';
+    sheet.style.breakBefore = 'auto';
+    sheet.style.pageBreakBefore = 'auto';
+    sheet.style.breakAfter = 'auto';
+    sheet.style.pageBreakAfter = 'auto';
+  });
   const sourceImages = Array.from(root.querySelectorAll('img'));
   const clonedImages = Array.from(clone.querySelectorAll('img'));
 
@@ -628,22 +646,37 @@ export const ExamEditorView: React.FC<ExamEditorViewProps> = ({
       padding: 0 !important;
       gap: 0 !important;
     }
-    .a4-print-sheet {
+    .a4-print-pages-root > .a4-print-sheet {
       display: flex !important;
+      visibility: visible !important;
       width: ${widthMm}mm !important;
       height: ${heightMm}mm !important;
+      min-height: ${heightMm}mm !important;
       margin: 0 !important;
+      padding: 24px !important;
+      box-sizing: border-box !important;
       box-shadow: none !important;
       border: none !important;
       zoom: 1 !important;
       transform: none !important;
       overflow: hidden !important;
-      page-break-after: always !important;
-      break-after: page !important;
+      page-break-before: auto !important;
+      break-before: auto !important;
+      page-break-after: auto !important;
+      break-after: auto !important;
       page-break-inside: avoid !important;
       break-inside: avoid-page !important;
     }
-    .a4-print-sheet:last-child {
+    /* Use exactly one page transition: before each sheet except the first. */
+    .a4-print-pages-root > .a4-print-sheet ~ .a4-print-sheet {
+      page-break-before: always !important;
+      break-before: page !important;
+    }
+    .a4-print-pages-root > .a4-print-sheet:first-child {
+      page-break-before: auto !important;
+      break-before: auto !important;
+    }
+    .a4-print-pages-root > .a4-print-sheet:last-child {
       page-break-after: auto !important;
       break-after: auto !important;
     }
