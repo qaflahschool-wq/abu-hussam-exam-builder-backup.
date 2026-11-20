@@ -818,7 +818,7 @@ class ApiService {
     gradeHint?: GradeLevel,
     unitHint?: string
   ): Promise<{ success: boolean; result: ExtractedAnalysisResult; modelUsed: string }> {
-    return this.request('/api/vision/analyze', {
+    return this.request('/api/worker/vision/analyze', {
       method: 'POST',
       body: JSON.stringify({ images, gradeHint, unitHint }),
     });
@@ -834,7 +834,7 @@ class ApiService {
     teacherNotes?: string;
     saveToBank?: boolean;
   }): Promise<{ success: boolean; questions: Question[]; modelUsed: string }> {
-    return this.request('/api/vision/generate-questions', {
+    return this.request('/api/worker/vision/generate-questions', {
       method: 'POST',
       body: JSON.stringify(params),
     });
@@ -845,7 +845,7 @@ class ApiService {
     analysis: ExtractedAnalysisResult;
     contentScope?: ContentScope;
   }): Promise<SemanticFidelityReport & { success: boolean }> {
-    return this.request('/api/vision/validate-fidelity', {
+    return this.request('/api/worker/vision/validate-fidelity', {
       method: 'POST',
       body: JSON.stringify(params),
     });
