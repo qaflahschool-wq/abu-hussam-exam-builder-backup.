@@ -414,7 +414,7 @@ export default {
         const list=(r.results||[]).flatMap(row=>{try{const n=JSON.parse(row.record_json) as Record<string,unknown>;
           const readBy=Array.isArray(n.readBy)?n.readBy.map(String):[];
           return [{...n,readBy}];}catch{return[]}});
-        return json({notifications:list,unreadCount:list.filter(n=>!(n.readBy as string[]).includes(auth.user.id)).length});
+        return json({notifications:list,unreadCount:list.filter(n=>!(n.readBy as string[]).includes(String(auth.user.id))).length});
       } catch(e) { console.error('Worker notifications read failed',e); return json({error:'Notifications unavailable'},500); }
     }
     const notificationReadMatch=url.pathname.match(/^\/api\/worker\/notifications\/([A-Za-z0-9_-]{1,128})\/read$/);
@@ -429,7 +429,7 @@ export default {
         if (!row) return json({error:'NOTIFICATION_NOT_FOUND'},404);
         const n=JSON.parse(row.record_json) as Record<string,unknown>;
         const readBy=Array.isArray(n.readBy)?n.readBy.map(String):[];
-        if (!readBy.includes(auth.user.id)) readBy.push(auth.user.id);
+        if (!readBy.includes(auth.user.id)) readBy.push(String(auth.user.id));
         n.readBy=readBy;
         const u=await env.DB.prepare('UPDATE notifications SET record_json=? WHERE id=?').bind(JSON.stringify(n),id).run();
         return u.success?json({success:true}):json({error:'NOTIFICATION_UPDATE_FAILED'},503);
@@ -445,7 +445,7 @@ export default {
         let updatedCount=0;
         for (const row of r.results||[]) {
           try {const n=JSON.parse(row.record_json) as Record<string,unknown>;const reads=Array.isArray(n.readBy)?n.readBy.map(String):[];
-            if (!reads.includes(auth.user.id)) {reads.push(auth.user.id);n.readBy=reads;
+            if (!reads.includes(auth.user.id)) {reads.push(String(auth.user.id));n.readBy=reads;
               const u=await env.DB.prepare('UPDATE notifications SET record_json=? WHERE id=?').bind(JSON.stringify(n),row.id).run();
               if (u.success) updatedCount++;}}
           catch {/* Ignore malformed notification and continue. */}
