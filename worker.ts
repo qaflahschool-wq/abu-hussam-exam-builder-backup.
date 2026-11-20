@@ -56,6 +56,26 @@ function serviceUnavailable(env: Env): boolean {
   return !env.DB || typeof env.SESSION_SECRET !== 'string' || env.SESSION_SECRET.length < 32;
 }
 
+function canAccessQuestionScope(user: Record<string, unknown>, grade: string, subjectId: string): boolean {
+  const role = String(user.role || '');
+  if (['PlatformOwner', 'Administrator', 'SchoolAdmin'].includes(role)) return true;
+  const grades = Array.isArray(user.assignedGrades) ? user.assignedGrades.map(String) : [];
+  const subjects = Array.isArray(user.assignedSubjects) ? user.assignedSubjects.map(String) : [];
+  if (grades.length === 0 || subjects.length === 0) return false;
+  return (grades.includes('all') || grades.includes(grade)) &&
+    (subjects.includes('all') || subjects.includes(subjectId));
+}
+
+function canEditQuestion(user: Record<string, unknown>, question: Record<string, unknown>): boolean {
+  if (question.ownerId === user.id) return true;
+  const shares = Array.isArray(question.sharedWith) ? question.sharedWith : [];
+  return shares.some((entry) =>
+    Boolean(entry) && typeof entry === 'object' &&
+    (entry as Record<string, unknown>).userId === user.id &&
+    (entry as Record<string, unknown>).permission === 'edit'
+  );
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -115,6 +135,130 @@ export default {
       } catch (error) {
         console.error('Worker question bank read failed', error);
         return json({ error: 'Question bank unavailable' }, 500);
+      }
+    }
+
+
+    const questionItemMatch = url.pathname.match(/^\\/api\\/worker\\/questions\\/([A-Za-z0-9_-]{1,128})$/);
+    if ((url.pathname === '/api/worker/questions' && request.method === 'POST') ||
+        (questionItemMatch && (request.method === 'PUT' || request.method === 'DELETE'))) {
+      if (serviceUnavailable(env)) return json({ error: 'Service unavailable' }, 503);
+      try {
+        const users = new D1UserRepository(env.DB);
+        const versions = new D1AuthVersionReader(env.DB);
+        const auth = await authenticateWorkerRequest(request, env.SESSION_SECRET, versions, users);
+        if (!auth.ok) return json({ error: auth.error }, auth.status);
+
+        if (url.pathname === '/api/worker/questions' && request.method === 'POST') {
+          const length = Number(request.headers.get('Content-Length') || 0);
+          if (length > 10_000_000) return json({ error: 'Question payload is too large' }, 413);
+          const body: unknown = await request.json().catch(() => null);
+          if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Invalid question payload' }, 400);
+          const input = body as Record<string, unknown>;
+          const grade = typeof input.grade === 'string' ? input.grade.trim() : '';
+          const subjectId = typeof input.subjectId === 'string' && input.subjectId.trim() ? input.subjectId.trim() : 'subj-en';
+          if (typeof input.questionText !== 'string' || !input.questionText.trim() ||
+              typeof input.modelAnswer !== 'string' || !input.modelAnswer.trim() || !grade ||
+              grade.length > 64 || subjectId.length > 128 ||
+              input.questionText.length > 20_000 || input.modelAnswer.length > 20_000) {
+            return json({ error: 'Question text, grade, and model answer are required' }, 400);
+          }
+          if (!canAccessQuestionScope(auth.user as Record<string, unknown>, grade, subjectId)) {
+            return json({ error: 'FORBIDDEN_ACADEMIC_SCOPE' }, 403);
+          }
+          const role = String(auth.user.role || '');
+          const hasAIAccess = ['PlatformOwner', 'Administrator'].includes(role) && auth.user.hasAIAccess === true;
+          const type = typeof input.type === 'string' ? input.type : '';
+          const isQuranQuestion = subjectId === 'subj-quran' || type.startsWith('Quran');
+          const createdAt = new Date().toISOString();
+          const question: Record<string, unknown> = {
+            ...input,
+            id: `q-${crypto.randomUUID()}`,
+            ownerId: auth.user.id,
+            subjectId,
+            preserveDiacritics: isQuranQuestion ? true : input.preserveDiacritics,
+            source: hasAIAccess ? (input.source || 'Question Bank') : 'Teacher Manual',
+            sourceCode: hasAIAccess
+              ? (input.sourceCode || 'CURRICULUM')
+              : input.sourceCode === 'IMAGE_SOURCE' ? 'TEACHER_MANUAL' : (input.sourceCode || 'TEACHER_MANUAL'),
+            educationalLevel: input.educationalLevel || 'BASIC',
+            sharedWith: [],
+            createdAt,
+          };
+          const result = await env.DB.prepare(
+            'INSERT INTO questions (id, owner_id, subject_id, grade, unit_id, record_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)'
+          ).bind(
+            question.id, auth.user.id, subjectId, grade,
+            typeof input.unitId === 'string' ? input.unitId : null,
+            JSON.stringify(question), createdAt
+          ).run();
+          if (!result.success) return json({ error: 'Question could not be saved' }, 503);
+          return json({ success: true, question });
+        }
+
+        const questionId = questionItemMatch?.[1] || '';
+        const row = await env.DB.prepare('SELECT record_json FROM questions WHERE id = ? LIMIT 1')
+          .bind(questionId).first<{ record_json: string }>();
+        if (!row) return json({ error: 'QUESTION_NOT_FOUND' }, 404);
+        let existing: Record<string, unknown>;
+        try {
+          const parsed: unknown = JSON.parse(row.record_json);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid record');
+          existing = parsed as Record<string, unknown>;
+        } catch {
+          return json({ error: 'Question record is invalid' }, 500);
+        }
+        const existingGrade = typeof existing.grade === 'string' ? existing.grade : '';
+        const existingSubject = typeof existing.subjectId === 'string' ? existing.subjectId : 'subj-en';
+        if (!canAccessQuestionScope(auth.user as Record<string, unknown>, existingGrade, existingSubject)) {
+          return json({ error: 'FORBIDDEN_ACADEMIC_SCOPE' }, 403);
+        }
+
+        if (request.method === 'DELETE') {
+          if ((existing.ownerId || 'usr-admin') !== auth.user.id) return json({ error: 'FORBIDDEN_QUESTION_DELETE' }, 403);
+          const removed = await env.DB.prepare('DELETE FROM questions WHERE id = ? AND owner_id = ?')
+            .bind(questionId, auth.user.id).run();
+          if (!removed.success) return json({ error: 'Question could not be deleted' }, 503);
+          if (Number(removed.meta?.changes || 0) !== 1) return json({ error: 'QUESTION_NOT_FOUND' }, 404);
+          return json({ success: true });
+        }
+
+        if (!canEditQuestion(auth.user as Record<string, unknown>, existing)) {
+          return json({ error: 'FORBIDDEN_QUESTION_EDIT' }, 403);
+        }
+        const body: unknown = await request.json().catch(() => null);
+        if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Invalid question update' }, 400);
+        const patch = body as Record<string, unknown>;
+        const { ownerId: _owner, createdBy: _creator, sharedWith: _shares, id: _id, createdAt: _created, updatedAt: _updated, ...safePatch } = patch;
+        const nextGrade = typeof safePatch.grade === 'string' ? safePatch.grade : existingGrade;
+        const nextSubject = typeof safePatch.subjectId === 'string' ? safePatch.subjectId : existingSubject;
+        if (!canAccessQuestionScope(auth.user as Record<string, unknown>, nextGrade, nextSubject)) {
+          return json({ error: 'FORBIDDEN_ACADEMIC_SCOPE' }, 403);
+        }
+        if ((safePatch.questionText !== undefined && (typeof safePatch.questionText !== 'string' || !safePatch.questionText.trim())) ||
+            (safePatch.modelAnswer !== undefined && (typeof safePatch.modelAnswer !== 'string' || !safePatch.modelAnswer.trim()))) {
+          return json({ error: 'Question text and model answer cannot be empty' }, 400);
+        }
+        const updatedAt = new Date().toISOString();
+        const updated: Record<string, unknown> = {
+          ...existing,
+          ...safePatch,
+          id: questionId,
+          ownerId: existing.ownerId,
+          updatedAt,
+        };
+        const saved = await env.DB.prepare(
+          'UPDATE questions SET subject_id = ?, grade = ?, unit_id = ?, record_json = ?, updated_at = ? WHERE id = ?'
+        ).bind(
+          nextSubject, nextGrade,
+          typeof updated.unitId === 'string' ? updated.unitId : null,
+          JSON.stringify(updated), updatedAt, questionId
+        ).run();
+        if (!saved.success) return json({ error: 'Question could not be updated' }, 503);
+        return json({ success: true, question: updated });
+      } catch (error) {
+        console.error('Worker question mutation failed', error);
+        return json({ error: 'Question operation failed' }, 500);
       }
     }
 
