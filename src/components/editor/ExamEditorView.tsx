@@ -176,30 +176,34 @@ async function buildPdfHeadStyles(): Promise<string> {
   const nodes = Array.from(document.head.querySelectorAll('link[rel="stylesheet"], style'));
   const rendered = await Promise.all(nodes.map(async (node) => {
     const media = node.getAttribute('media') || '';
-    if (media && /(?:^|,)\s*(?:only\s+)?print\b/i.test(media)) return '';
+    if (media && /(?:^|,)\\s*(?:only\\s+)?print\\b/i.test(media)) return '';
 
     if (node.tagName.toLowerCase() !== 'link') {
       const style = node as HTMLStyleElement;
       const css = stripPrintMediaRules(style.textContent || '');
-      return '<style>' + css.replace(/<\/style/gi, '<\\/style') + '</style>';
+      return '<style>' + css.replace(/<\\/style/gi, '<\\\\/style') + '</style>';
     }
 
     const href = (node as HTMLLinkElement).href;
     try {
       const url = new URL(href, window.location.href);
-      if (url.origin !== window.location.origin) return '';
-      const response = await fetch(url.href, { credentials: 'same-origin' });
+      // Embed CORS-enabled remote stylesheets (notably Google Fonts), because
+      // the isolated Cloudflare PDF browser cannot fetch network resources.
+      const response = await fetch(url.href, {
+        mode: 'cors',
+        credentials: url.origin === window.location.origin ? 'same-origin' : 'omit',
+      });
       if (!response.ok) return '';
       const sourceCss = await response.text();
       const css = stripPrintMediaRules(await inlineCssAssetUrls(sourceCss, url.href));
-      return '<style>' + css.replace(/<\/style/gi, '<\\/style') + '</style>';
+      return '<style>' + css.replace(/<\\/style/gi, '<\\\\/style') + '</style>';
     } catch {
+      // Keep system fallbacks if an optional stylesheet blocks cross-origin access.
       return '';
     }
   }));
-  return rendered.join('\n');
+  return rendered.filter(Boolean).join('\\n');
 }
-
 async function buildPdfSheetsHtml(root: HTMLElement): Promise<string> {
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
   const clone = root.cloneNode(true) as HTMLElement;
@@ -733,7 +737,7 @@ export const ExamEditorView: React.FC<ExamEditorViewProps> = ({
       height: ${heightMm}mm !important;
       min-height: ${heightMm}mm !important;
       margin: 0 !important;
-      padding: 24px !important;
+      /* Keep each sheet's inline, configured margins from the pagination renderer. */
       box-sizing: border-box !important;
       box-shadow: none !important;
       border: none !important;
