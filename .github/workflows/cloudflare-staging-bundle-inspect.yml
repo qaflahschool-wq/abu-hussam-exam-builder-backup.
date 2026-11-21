@@ -1,0 +1,38 @@
+name: Inspect Cloudflare staging build output
+
+on:
+  push:
+    branches:
+      - cloudflare/staging-foundation-2026-11-20
+    paths:
+      - 'worker.ts'
+      - 'wrangler.jsonc'
+      - 'src/**'
+      - 'server/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/cloudflare-staging-bundle-inspect.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      - name: Compile Worker bundle without deployment
+        run: npx --yes wrangler@4.165.0 deploy --dry-run --config wrangler.jsonc --outdir .wrangler/staging-bundle
+      - name: Inspect generated files
+        run: |
+          echo '--- bundle files ---'
+          find .wrangler/staging-bundle -maxdepth 3 -type f -printf '%p %s bytes\n' | sort
+          echo '--- dist files ---'
+          find dist -maxdepth 3 -type f -printf '%p %s bytes\n' | sort | head -100

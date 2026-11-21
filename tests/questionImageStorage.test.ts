@@ -1,0 +1,149 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  QuestionImageStorage,
+  type R2Bucket,
+  type R2ObjectBody,
+} from '../server/cloudflare/questionImageStorage.js';
+import type { D1Database, D1PreparedStatement } from '../server/cloudflare/d1RecordStore.js';
+
+function createImageMocks() {
+  const objects = new Map<string, Uint8Array>();
+  const calls: { sql: string; values: unknown[] }[] = [];
+  const bucket: R2Bucket = {
+    async put(key, bytes) { objects.set(key, new Uint8Array(bytes)); },
+    async get(key): Promise<R2ObjectBody | null> {
+      const bytes = objects.get(key);
+      if (!bytes) return null;
+      return { async arrayBuffer() { return bytes.slice().buffer; } };
+    },
+    async delete(key) { objects.delete(key); },
+  };
+  const database: D1Database = {
+    prepare(sql): D1PreparedStatement {
+      let values: unknown[] = [];
+      return {
+        bind(...bound) { values = bound; return this; },
+        async first<T>() {
+          calls.push({ sql, values });
+          if (sql.includes('FROM question_images')) {
+            const id = String(values[0]);
+            const row = metadataRows.get(id);
+            if (!row || row.owner_id !== String(values[1])) return null;
+            return row as T;
+          }
+          return null;
+        },
+        async all<T>() { return { success: true, results: [] as T[] }; },
+        async run() {
+          calls.push({ sql, values });
+          if (sql.startsWith('INSERT INTO question_images')) {
+            metadataRows.set(String(values[0]), {
+              owner_id: String(values[1]),
+              object_key: String(values[3]),
+              content_type: String(values[4]),
+              byte_size: Number(values[5]),
+            });
+          }
+          return { success: true, meta: { changes: 1 } };
+        },
+      };
+    },
+  };
+  const metadataRows = new Map<string, { owner_id: string; object_key: string; content_type: string; byte_size: number }>();
+  return {
+    storage: new QuestionImageStorage(bucket, database),
+    objects,
+    calls,
+  };
+}
+
+test('uploads a supported image to R2 and persists ownership metadata in D1', async () => {
+  const mocks = createImageMocks();
+  const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const metadata = await mocks.storage.upload({
+    ownerId: 'owner-1',
+    questionId: 'question-1',
+    contentType: 'image/png',
+    bytes,
+  });
+  assert.equal(metadata.ownerId, 'owner-1');
+  assert.equal(metadata.questionId, 'question-1');
+  assert.equal(metadata.byteSize, 8);
+  assert.match(metadata.checksumSha256, /^[a-f0-9]{64}$/);
+  assert.equal(mocks.objects.has(metadata.objectKey), true);
+  assert.match(mocks.calls[0].sql, /INSERT INTO question_images/);
+  assert.equal(mocks.calls[0].values[1], 'owner-1');
+});
+
+test('rejects unsupported formats before writing to R2', async () => {
+  const mocks = createImageMocks();
+  await assert.rejects(
+    () => mocks.storage.upload({
+      ownerId: 'owner-1',
+      questionId: 'question-1',
+      contentType: 'image/svg+xml',
+      bytes: new Uint8Array([0xff, 0xd8, 0xff, 0x00]),
+    }),
+    /Unsupported image type/
+  );
+  assert.equal(mocks.objects.size, 0);
+});
+
+
+test('rejects content whose file signature does not match its declared MIME type', async () => {
+  const mocks = createImageMocks();
+  await assert.rejects(
+    () => mocks.storage.upload({
+      ownerId: 'owner-1',
+      questionId: 'question-1',
+      contentType: 'image/png',
+      bytes: new Uint8Array([0xff, 0xd8, 0xff, 0x00]),
+    }),
+    /does not match/
+  );
+  assert.equal(mocks.objects.size, 0);
+});
+
+test('rejects oversized image data', async () => {
+  const mocks = createImageMocks();
+  await assert.rejects(
+    () => mocks.storage.upload({
+      ownerId: 'owner-1',
+      questionId: 'question-1',
+      contentType: 'image/jpeg',
+      bytes: new Uint8Array(2_936_013),
+    }),
+    /Image size/
+  );
+  assert.equal(mocks.objects.size, 0);
+});
+
+test('prevents path-like owner and question identifiers', async () => {
+  const mocks = createImageMocks();
+  await assert.rejects(
+    () => mocks.storage.upload({
+      ownerId: '../other-user',
+      questionId: 'question-1',
+      contentType: 'image/jpeg',
+      bytes: new Uint8Array([1]),
+    }),
+    /Invalid owner id/
+  );
+  assert.equal(mocks.objects.size, 0);
+});
+
+test('reads only images owned by the authenticated user', async () => {
+  const mocks = createImageMocks();
+  const metadata = await mocks.storage.upload({
+    ownerId: 'owner-1',
+    questionId: 'question-1',
+    contentType: 'image/webp',
+    bytes: new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]),
+  });
+  assert.equal(await mocks.storage.getForOwner(metadata.id, 'another-owner'), null);
+  const loaded = await mocks.storage.getForOwner(metadata.id, 'owner-1');
+  assert.ok(loaded);
+  assert.equal(loaded.contentType, 'image/webp');
+  assert.deepEqual(Array.from(new Uint8Array(loaded.bytes)), [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
+});

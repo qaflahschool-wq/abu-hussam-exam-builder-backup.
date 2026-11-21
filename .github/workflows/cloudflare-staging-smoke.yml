@@ -1,0 +1,84 @@
+name: Cloudflare staging smoke test
+
+on:
+  push:
+    branches:
+      - cloudflare/staging-foundation-2026-11-20
+    paths:
+      - '.github/workflows/cloudflare-staging-smoke.yml'
+      - 'src/**'
+      - 'worker.ts'
+      - 'server/cloudflare/**'
+      - 'wrangler.jsonc'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check deployed Worker health after final secret rotation
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/api/worker/health \
+            -o /tmp/health.json
+          cat /tmp/health.json
+          node -e "const h=require('/tmp/health.json'); if(h.status!=='ok') process.exit(1);"
+      - name: Check R2-hosted frontend and SPA fallback
+        run: |
+          status=$(curl --silent --show-error --max-time 30 -o /tmp/index.html -w '%{http_code}' https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev/)
+          echo "Worker frontend HTTP status: $status"
+          test "$status" = "200"
+          grep -q '<div id="root"' /tmp/index.html
+          asset=$(grep -oE 'src="[^"]+\.js"' /tmp/index.html | head -1 | cut -d'"' -f2)
+          test -n "$asset"
+          curl --fail --silent --show-error --max-time 30 -o /tmp/app.js "https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev$asset"
+          grep -Fq "حالة التخزين الفعلية: Cloudflare D1" /tmp/app.js
+          grep -Fq "كلمة المرور يجب أن تكون بين 8 و128 حرفاً" /tmp/app.js
+          echo "R2 frontend HTML, JavaScript, D1 status UI, and password policy are verified"
+
+      - name: Verify protected API routes fail closed without a session
+        run: |
+          base="https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev"
+          paths=(
+            /api/worker/auth/me
+            /api/worker/questions
+            /api/worker/exams
+            /api/worker/curricula
+            /api/worker/notifications
+            /api/worker/system/stats
+            /api/worker/layout-templates
+            /api/worker/documents
+            /api/worker/archive
+            /api/worker/ai/settings
+            /api/worker/ai/models
+            /api/worker/ai/logs
+            /api/worker/owner/registration-requests
+            /api/worker/owner/control-center
+            /api/worker/owner/audit-logs
+            /api/worker/system/users
+            /api/worker/system/audit-logs
+            /api/worker/system/storage-status
+          )
+          for path in "${paths[@]}"; do
+            status=$(curl --silent --show-error --max-time 20 -o /tmp/route.json -w '%{http_code}' "$base$path")
+            if [ "$status" != "401" ] && [ "$status" != "403" ]; then
+              echo "Expected an authentication/authorization response for $path, got HTTP $status"
+              cat /tmp/route.json
+              exit 1
+            fi
+            echo "PASS $path -> HTTP $status"
+          done
+
+      - name: Verify public login-page data and completed bootstrap
+        run: |
+          base="https://abu-hussam-exam-builder-staging.alshakliamohammed04.workers.dev"
+          curl --fail --silent --show-error --max-time 20 "$base/api/worker/catalog/subjects?active=true" -o /tmp/subjects.json
+          node -e "const x=require('/tmp/subjects.json'); if(!Array.isArray(x)||x.length<1) process.exit(1); console.log('Active subjects:',x.length);"
+          curl --fail --silent --show-error --max-time 20 "$base/api/worker/school/identity" -o /tmp/identity.json
+          node -e "const x=require('/tmp/identity.json'); if(x.schoolNameAr!=='مدرسة قفلة للتعليم الأساسي') process.exit(1); console.log('School identity:',x.schoolNameAr);"
+          curl --fail --silent --show-error --max-time 20 "$base/api/worker/bootstrap/status" -o /tmp/bootstrap.json
+          node -e "const x=require('/tmp/bootstrap.json'); if(x.needsSetup!==false) process.exit(1); console.log('Owner bootstrap complete');"

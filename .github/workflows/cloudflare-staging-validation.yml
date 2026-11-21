@@ -1,0 +1,66 @@
+name: Cloudflare staging baseline
+
+on:
+  push:
+    branches:
+      - cloudflare/staging-foundation-2026-11-20
+  pull_request:
+    branches:
+      - cloudflare/staging-foundation-2026-11-20
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cloudflare-staging-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: TypeScript validation
+        run: npm run lint
+
+      - name: Unit and image validation tests
+        run: npm test
+
+      - name: Production bundle build
+        run: npm run build
+
+      - name: Cloudflare Worker bundle validation (no deployment)
+        run: npm run worker:dry-run
+
+      - name: Compile deployable Worker bundle without publishing
+        run: npx --yes wrangler@4.165.0 deploy --dry-run --config wrangler.jsonc --outdir .wrangler/staging-bundle
+
+      - name: Package Worker and static assets
+        run: node scripts/export-staging-bundle.mjs
+
+      - name: Remove build dependencies before creating the artifact branch
+        run: rm -rf node_modules .wrangler dist server.js
+
+      - name: Publish immutable staging build artifact branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan cloudflare/staging-deploy-artifacts
+          git rm -rf .
+          cp -R /tmp/abu-hussam-staging-deploy-artifact/. .
+          git add .
+          git commit -m "Build staging deployment artifact for ${GITHUB_SHA}"
+          git push origin HEAD:cloudflare/staging-deploy-artifacts --force

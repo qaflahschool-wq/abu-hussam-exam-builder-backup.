@@ -1,0 +1,22 @@
+services:
+  abu-hussam-exam-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: abu-hussam-exam-builder:latest
+    container_name: abu-hussam-exam-builder
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CHROME_PATH: /usr/bin/chromium
+    ports:
+      - "3000:3000"
+    volumes:
+      - exam_builder_data:/app/data
+    init: true
+
+volumes:
+  exam_builder_data:
