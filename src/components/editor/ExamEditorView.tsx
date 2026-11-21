@@ -81,6 +81,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 async function inlineCssAssetUrls(css: string, stylesheetUrl: string): Promise<string> {
+  // Match CSS url(...) tokens, including Google Fonts .woff2 resources.
   const matches = Array.from(css.matchAll(/url\\((['"]?)([^'")]+)\\1\\)/g));
   let output = css;
   for (const match of matches) {
@@ -89,18 +90,22 @@ async function inlineCssAssetUrls(css: string, stylesheetUrl: string): Promise<s
     if (!rawUrl || /^(?:data:|blob:|#)/i.test(rawUrl)) continue;
     try {
       const resolved = new URL(rawUrl, stylesheetUrl);
-      if (resolved.origin !== window.location.origin) continue;
-      const response = await fetch(resolved.href, { credentials: 'same-origin' });
+      const sameOrigin = resolved.origin === window.location.origin;
+      const response = await fetch(resolved.href, {
+        mode: 'cors',
+        credentials: sameOrigin ? 'same-origin' : 'omit',
+      });
       if (!response.ok) continue;
-      const dataUrl = await blobToDataUrl(await response.blob());
+      const blob = await response.blob();
+      if (!blob.size) continue;
+      const dataUrl = await blobToDataUrl(blob);
       output = output.replaceAll(original, `url("${dataUrl}")`);
     } catch {
-      // Missing optional CSS assets fall back to the browser's default font/style.
+      // Retain the declared font stack's local fallbacks if an asset disallows CORS.
     }
   }
   return output;
 }
-
 /**
  * Remove print-only rules copied from the application shell before rendering
  * the isolated, already-paginated exam sheets. Those rules target the full app
