@@ -2,10 +2,10 @@
 
 @layer base {
   :root {
-    --primary: #0f2537;
-    --primary-light: #1e3a5f;
-    --accent-gold: #d97706;
-    --accent-gold-light: #fbbf24;
+    --primary: #59683A;
+    --primary-light: #78884C;
+    --accent-gold: #59683A;
+    --accent-gold-light: #E8ECDD;
   }
 
   html, body {
@@ -231,3 +231,33 @@
     break-inside: avoid-page !important;
   }
 }
+
+/* ABU HUSSAM — unified olive green and white identity */
+:root {
+  --ah-olive: #59683A;
+  --ah-olive-hover: #46552B;
+  --ah-olive-soft: #78884C;
+  --ah-olive-pale: #F1F3E9;
+  --ah-olive-tint: #E8ECDD;
+  --ah-olive-border: #DCE2CA;
+  --ah-white: #FFFFFF;
+  --ah-page: #F5F6F0;
+}
+.app-shell-root { background-color: var(--ah-page); color: #263020; }
+.app-shell-root .bg-slate-50 { background-color: var(--ah-page) !important; }
+.app-shell-root .bg-emerald-50 { background-color: var(--ah-olive-pale) !important; }
+.app-shell-root .bg-emerald-100 { background-color: var(--ah-olive-tint) !important; }
+.app-shell-root .bg-emerald-200 { background-color: #DDE4CE !important; }
+.app-shell-root .bg-emerald-500 { background-color: var(--ah-olive-soft) !important; }
+.app-shell-root .bg-emerald-600, .app-shell-root .bg-emerald-700 { background-color: var(--ah-olive) !important; }
+.app-shell-root .bg-emerald-800, .app-shell-root .bg-emerald-900 { background-color: var(--ah-olive-hover) !important; }
+.app-shell-root .text-emerald-300, .app-shell-root .text-emerald-400, .app-shell-root .text-emerald-500, .app-shell-root .text-emerald-600, .app-shell-root .text-emerald-700, .app-shell-root .text-emerald-800, .app-shell-root .text-emerald-900 { color: var(--ah-olive) !important; }
+.app-shell-root .border-emerald-100, .app-shell-root .border-emerald-200, .app-shell-root .border-emerald-300 { border-color: var(--ah-olive-border) !important; }
+.app-shell-root .border-emerald-500, .app-shell-root .border-emerald-600, .app-shell-root .border-emerald-700 { border-color: var(--ah-olive) !important; }
+.app-shell-root .ring-emerald-500, .app-shell-root .ring-emerald-600 { --tw-ring-color: var(--ah-olive-soft) !important; }
+.app-shell-root [class~="bg-[#1B5E3A]"], .app-shell-root [class~="bg-[#17613b]"], .app-shell-root [class~="bg-[#59683a]"] { background-color: var(--ah-olive) !important; }
+.app-shell-root [class~="hover:bg-[#144D2E]"]:hover, .app-shell-root [class~="hover:bg-[#46552b]"]:hover { background-color: var(--ah-olive-hover) !important; }
+.app-shell-root [class~="text-[#1B5E3A]"], .app-shell-root [class~="text-[#59683a]"] { color: var(--ah-olive) !important; }
+.app-shell-root [class~="border-[#1B5E3A]"], .app-shell-root [class~="border-[#59683a]"] { border-color: var(--ah-olive) !important; }
+.app-shell-root input:focus, .app-shell-root select:focus, .app-shell-root textarea:focus { --tw-ring-color: var(--ah-olive-soft); border-color: var(--ah-olive-soft); }
+.app-shell-root ::selection { background: var(--ah-olive-tint); color: var(--ah-olive-hover); }
