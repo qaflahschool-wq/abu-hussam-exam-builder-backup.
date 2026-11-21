@@ -99,7 +99,7 @@ async function inlineCssAssetUrls(css: string, stylesheetUrl: string): Promise<s
       const blob = await response.blob();
       if (!blob.size) continue;
       const dataUrl = await blobToDataUrl(blob);
-      output = output.replaceAll(original, \`url("\${dataUrl}")\`);
+      output = output.replaceAll(original, `url("${dataUrl}")`);
     } catch {
       // Retain local font fallbacks if an asset disallows CORS.
     }
@@ -763,6 +763,25 @@ export const ExamEditorView: React.FC<ExamEditorViewProps> = ({
     .a4-print-pages-root > .a4-print-sheet:first-child {
       page-break-before: auto !important;
       break-before: auto !important;
+    }
+    /* Match the current olive-and-white identity in the isolated PDF. */
+    .a4-print-sheet .official-school-header [class~="border-[#1B5E3A]"],
+    .a4-print-sheet .official-school-header [class~="border-[#1B5E3A]/30"],
+    .a4-print-sheet .official-school-header [class~="border-[#1B5E3A]/20"] {
+      border-color: #59683A !important;
+    }
+    .a4-print-sheet .official-school-header [class~="text-[#1B5E3A]"] {
+      color: #59683A !important;
+    }
+    .a4-print-sheet .official-school-header [class~="bg-[#1B5E3A]"] {
+      background-color: #59683A !important;
+    }
+    .a4-print-sheet .official-school-header [class~="bg-[#1B5E3A]/[0.05]"] {
+      background-color: #F1F3E9 !important;
+    }
+    .a4-print-sheet {
+      font-family: ${getFontFamilyCss(layoutConfig.fontFamily)} !important;
+      font-synthesis: none;
     }
     .a4-print-pages-root > .a4-print-sheet:last-child {
       page-break-after: auto !important;
