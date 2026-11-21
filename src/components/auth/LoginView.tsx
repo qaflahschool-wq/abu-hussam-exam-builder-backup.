@@ -171,12 +171,17 @@ export const LoginView: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-8 px-4 sm:px-6 lg:px-8" dir="rtl">
-      <div className="max-w-5xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+    <div className="relative min-h-screen overflow-hidden bg-[#f3f6f8] flex flex-col justify-center py-8 px-4 sm:px-6 lg:px-8" dir="rtl">
+      <div className="pointer-events-none absolute -top-32 -left-24 h-80 w-80 rounded-full bg-emerald-100/70 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -right-24 h-96 w-96 rounded-full bg-amber-100/60 blur-3xl" />
+      <div className="relative z-10 max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 bg-white rounded-[28px] border border-white shadow-[0_28px_90px_-32px_rgba(15,35,55,0.28)] overflow-hidden">
         {/* School Identity Panel */}
-        <div className="lg:col-span-5 bg-[#123d26] text-white p-6 sm:p-8 flex flex-col justify-between space-y-6">
-          <div className="space-y-4">
-            <div className="w-24 h-24 rounded-2xl bg-white p-1.5 shadow-lg mx-auto lg:mx-0">
+        <div className="relative isolate overflow-hidden lg:col-span-5 bg-[#0b1e35] text-white p-7 sm:p-9 flex flex-col justify-between space-y-8">
+          <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full border border-white/10" />
+          <div className="pointer-events-none absolute -top-12 -right-12 h-48 w-48 rounded-full border border-white/10" />
+          <div className="pointer-events-none absolute -bottom-24 -left-20 h-64 w-64 rounded-full bg-emerald-500/10 blur-2xl" />
+          <div className="relative space-y-5">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-[22px] bg-white p-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)] mx-auto lg:mx-0 ring-1 ring-white/30">
               <img
                 src={logoSrc}
                 alt="شعار مدرسة قفلة للتعليم الأساسي"
@@ -185,24 +190,24 @@ export const LoginView: React.FC = () => {
             </div>
 
             <div className="space-y-1 text-center lg:text-right">
-              <p className="text-xs text-emerald-200 font-semibold">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300 font-extrabold">
                 {schoolIdentity?.countryTitleAr || 'الجمهورية اليمنية'} ·{' '}
                 {schoolIdentity?.ministryTitleAr || 'وزارة التربية والتعليم'}
               </p>
-              <h1 className="text-xl sm:text-2xl font-extrabold text-white leading-snug">
+              <h1 className="text-2xl sm:text-[30px] font-black text-white leading-[1.35]">
                 {schoolIdentity?.schoolNameAr || 'مدرسة قفلة للتعليم الأساسي'}
               </h1>
-              <p className="text-xs font-english font-bold tracking-wider text-emerald-300" dir="ltr">
+              <p className="text-xs font-english font-extrabold tracking-[0.22em] text-amber-300" dir="ltr">
                 {schoolIdentity?.schoolNameEn || 'QAFLAH SCHOOL'}
               </p>
             </div>
 
-            <p className="text-xs text-emerald-100/90 leading-relaxed pt-2 border-t border-emerald-700/60">
+            <p className="text-[13px] text-slate-200 leading-8 pt-5 border-t border-white/10">
               منصة <strong className="text-white">ABU HUSSAM EXAM BUILDER</strong> الموحدة لإعداد وتنسيق وطباعة الاختبارات المدرسية لجميع المواد الدراسية بما فيها القرآن الكريم مع عزل كامل لمساحات المعلمين.
             </p>
           </div>
 
-          <div className="space-y-2 text-[11px] text-emerald-200/90 border-t border-emerald-800/80 pt-4">
+          <div className="relative space-y-3 text-[11px] text-slate-200 border-t border-white/10 pt-5">
             <div>• استوديو تنسيق وطباعة A4 يدوي لجميع المعلمين</div>
             <div>• بوابة تسجيل جديدة تخضع لموافقة مالك المنصة قبل التفعيل</div>
             <div>• خصوصية مستقلة لكل معلم ومادة وصف دراسي</div>
@@ -211,9 +216,9 @@ export const LoginView: React.FC = () => {
         </div>
 
         {/* Auth Panel (Login / Register Tabs) */}
-        <div className="lg:col-span-7 p-6 sm:p-8 flex flex-col justify-center space-y-5">
+        <div className="lg:col-span-7 p-6 sm:p-10 lg:p-12 flex flex-col justify-center space-y-6">
           {/* Switch Tabs */}
-          <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200">
+          <div className="flex rounded-2xl bg-slate-100/90 p-1.5 border border-slate-200/80">
             <button
               type="button"
               onClick={() => {
@@ -249,10 +254,17 @@ export const LoginView: React.FC = () => {
           {authTab === 'login' ? (
             <>
               <div>
-                <h2 className="text-xl font-extrabold text-slate-900">تسجيل الدخول إلى البوابة المدرسية</h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  أدخل بيانات حسابك المعتمد للوصول إلى مساحة العمل الخاصة بك
+                <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1.5 text-[10px] font-extrabold text-[#1B5E3A]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  بوابة تعليمية ذكية وآمنة
+                </div>
+                <h2 className="text-2xl sm:text-[28px] font-black tracking-tight text-slate-950">مرحباً بعودتك</h2>
+                <p className="text-sm font-bold text-slate-700">تسجيل الدخول إلى منصة أبوحسام لبناء الاختبارات</p>
+                <p className="text-xs sm:text-sm text-slate-500 leading-6">
+                  أدخل بيانات حسابك المعتمد للانتقال إلى مساحة العمل الخاصة بك.
                 </p>
+              </div>
               </div>
 
               {error && (
@@ -295,7 +307,7 @@ export const LoginView: React.FC = () => {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="w-full py-3 bg-[#1B5E3A] hover:bg-[#144D2E] text-white font-extrabold text-sm rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="w-full py-3.5 bg-gradient-to-l from-[#17613b] to-[#1B5E3A] hover:from-[#124c30] hover:to-[#155332] text-white font-extrabold text-sm rounded-xl shadow-[0_10px_24px_rgba(27,94,58,0.22)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <span>{submitting ? 'جاري التحقق...' : 'دخول إلى النظام'}</span>
                   <ArrowLeft className="w-4 h-4" />
