@@ -171,15 +171,15 @@ export const LoginView: React.FC = () => {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#f3f6f8] flex flex-col justify-center py-8 px-4 sm:px-6 lg:px-8" dir="rtl">
-      <div className="pointer-events-none absolute -top-32 -left-24 h-80 w-80 rounded-full bg-emerald-100/70 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-40 -right-24 h-96 w-96 rounded-full bg-amber-100/60 blur-3xl" />
+    <div className="relative min-h-screen overflow-hidden bg-[#f5f6f0] flex flex-col justify-center py-8 px-4 sm:px-6 lg:px-8" dir="rtl">
+      <div className="pointer-events-none absolute -top-32 -left-24 h-80 w-80 rounded-full bg-[#e7eadc] blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -right-24 h-96 w-96 rounded-full bg-[#ecefdf] blur-3xl" />
       <div className="relative z-10 max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 bg-white rounded-[28px] border border-white shadow-[0_28px_90px_-32px_rgba(15,35,55,0.28)] overflow-hidden">
         {/* School Identity Panel */}
-        <div className="relative isolate overflow-hidden lg:col-span-5 bg-[#0b1e35] text-white p-7 sm:p-9 flex flex-col justify-between space-y-8">
+        <div className="relative isolate overflow-hidden lg:col-span-5 bg-[#59683a] text-white p-7 sm:p-9 flex flex-col justify-between space-y-8">
           <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full border border-white/10" />
           <div className="pointer-events-none absolute -top-12 -right-12 h-48 w-48 rounded-full border border-white/10" />
-          <div className="pointer-events-none absolute -bottom-24 -left-20 h-64 w-64 rounded-full bg-emerald-500/10 blur-2xl" />
+          <div className="pointer-events-none absolute -bottom-24 -left-20 h-64 w-64 rounded-full bg-white/10 blur-2xl" />
           <div className="relative space-y-5">
             <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-[22px] bg-white p-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)] mx-auto lg:mx-0 ring-1 ring-white/30">
               <img
@@ -190,24 +190,24 @@ export const LoginView: React.FC = () => {
             </div>
 
             <div className="space-y-1 text-center lg:text-right">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300 font-extrabold">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-[#e4e9d5] font-extrabold">
                 {schoolIdentity?.countryTitleAr || 'الجمهورية اليمنية'} ·{' '}
                 {schoolIdentity?.ministryTitleAr || 'وزارة التربية والتعليم'}
               </p>
               <h1 className="text-2xl sm:text-[30px] font-black text-white leading-[1.35]">
                 {schoolIdentity?.schoolNameAr || 'مدرسة قفلة للتعليم الأساسي'}
               </h1>
-              <p className="text-xs font-english font-extrabold tracking-[0.22em] text-amber-300" dir="ltr">
+              <p className="text-xs font-english font-extrabold tracking-[0.22em] text-[#f0f2e8]" dir="ltr">
                 {schoolIdentity?.schoolNameEn || 'QAFLAH SCHOOL'}
               </p>
             </div>
 
-            <p className="text-[13px] text-slate-200 leading-8 pt-5 border-t border-white/10">
+            <p className="text-[13px] text-[#f4f5ef] leading-8 pt-5 border-t border-white/10">
               منصة <strong className="text-white">ABU HUSSAM EXAM BUILDER</strong> الموحدة لإعداد وتنسيق وطباعة الاختبارات المدرسية لجميع المواد الدراسية بما فيها القرآن الكريم مع عزل كامل لمساحات المعلمين.
             </p>
           </div>
 
-          <div className="relative space-y-3 text-[11px] text-slate-200 border-t border-white/10 pt-5">
+          <div className="relative space-y-3 text-[11px] text-[#f4f5ef] border-t border-white/10 pt-5">
             <div>• استوديو تنسيق وطباعة A4 يدوي لجميع المعلمين</div>
             <div>• بوابة تسجيل جديدة تخضع لموافقة مالك المنصة قبل التفعيل</div>
             <div>• خصوصية مستقلة لكل معلم ومادة وصف دراسي</div>
@@ -227,7 +227,7 @@ export const LoginView: React.FC = () => {
               }}
               className={`flex-1 py-2.5 text-xs sm:text-sm font-extrabold rounded-lg transition-all flex items-center justify-center gap-2 ${
                 authTab === 'login'
-                  ? 'bg-white text-[#1B5E3A] shadow-xs border border-slate-200'
+                  ? 'bg-white text-[#59683a] shadow-xs border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -242,7 +242,7 @@ export const LoginView: React.FC = () => {
               }}
               className={`flex-1 py-2.5 text-xs sm:text-sm font-extrabold rounded-lg transition-all flex items-center justify-center gap-2 ${
                 authTab === 'register'
-                  ? 'bg-white text-[#1B5E3A] shadow-xs border border-slate-200'
+                  ? 'bg-white text-[#59683a] shadow-xs border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -255,8 +255,8 @@ export const LoginView: React.FC = () => {
             <>
               <div>
                 <div className="space-y-2">
-                <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1.5 text-[10px] font-extrabold text-[#1B5E3A]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <div className="inline-flex items-center gap-2 rounded-full bg-[#f1f3e9] border border-[#dce2ca] px-3 py-1.5 text-[10px] font-extrabold text-[#59683a]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#f1f3e9]0" />
                   بوابة تعليمية ذكية وآمنة
                 </div>
                 <h2 className="text-2xl sm:text-[28px] font-black tracking-tight text-slate-950">مرحباً بعودتك</h2>
@@ -283,7 +283,7 @@ export const LoginView: React.FC = () => {
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       placeholder="أدخل اسم المستخدم"
-                      className="w-full pr-10 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E3A]"
+                      className="w-full pr-10 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#78884c]"
                       dir="ltr"
                     />
                   </div>
@@ -298,7 +298,7 @@ export const LoginView: React.FC = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full pr-10 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E3A]"
+                      className="w-full pr-10 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#78884c]"
                       dir="ltr"
                     />
                   </div>
@@ -307,7 +307,7 @@ export const LoginView: React.FC = () => {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="w-full py-3.5 bg-gradient-to-l from-[#17613b] to-[#1B5E3A] hover:from-[#124c30] hover:to-[#155332] text-white font-extrabold text-sm rounded-xl shadow-[0_10px_24px_rgba(27,94,58,0.22)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="w-full py-3.5 bg-gradient-to-l from-[#6b7a45] to-[#59683a] hover:from-[#536238] hover:to-[#46552b] text-white font-extrabold text-sm rounded-xl shadow-[0_10px_24px_rgba(89,104,58,0.22)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <span>{submitting ? 'جاري التحقق...' : 'دخول إلى النظام'}</span>
                   <ArrowLeft className="w-4 h-4" />
@@ -318,27 +318,27 @@ export const LoginView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => { setShowOwnerRecovery(!showOwnerRecovery); setRecoveryError(''); setRecoverySuccess(''); }}
-                  className="text-xs font-bold text-[#1B5E3A] hover:underline"
+                  className="text-xs font-bold text-[#59683a] hover:underline"
                 >
                   {showOwnerRecovery ? 'العودة لتسجيل الدخول' : 'استعادة حساب المالك'}
                 </button>
               </div>
 
               {showOwnerRecovery && (
-                <form onSubmit={handleOwnerRecovery} className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <form onSubmit={handleOwnerRecovery} className="space-y-3 rounded-xl border border-[#dce2ca] bg-[#f1f3e9] p-4">
                   <div>
                     <h3 className="text-sm font-extrabold text-slate-900">استعادة حساب المالك</h3>
                     <p className="mt-1 text-xs leading-relaxed text-slate-600">هذه العملية لمرة واحدة فقط. أدخل رمز OWNER_RECOVERY_TOKEN الذي ستضيفه إلى أسرار Worker في Cloudflare، ثم عيّن كلمة مرور جديدة.</p>
                   </div>
                   {recoveryError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs font-bold text-rose-800">{recoveryError}</div>}
-                  {recoverySuccess && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-bold text-emerald-800">{recoverySuccess}</div>}
+                  {recoverySuccess && <div className="rounded-lg border border-[#dce2ca] bg-[#f1f3e9] p-2.5 text-xs font-bold text-[#46552b]">{recoverySuccess}</div>}
                   <label className="block text-xs font-bold text-slate-700">رمز الاستعادة (من Cloudflare)</label>
                   <input type="password" autoComplete="off" value={recoveryToken} onChange={(e) => setRecoveryToken(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" dir="ltr" />
                   <label className="block text-xs font-bold text-slate-700">كلمة المرور الجديدة</label>
                   <input type="password" autoComplete="new-password" value={recoveryPassword} onChange={(e) => setRecoveryPassword(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" dir="ltr" />
                   <label className="block text-xs font-bold text-slate-700">تأكيد كلمة المرور الجديدة</label>
                   <input type="password" autoComplete="new-password" value={recoveryConfirm} onChange={(e) => setRecoveryConfirm(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" dir="ltr" />
-                  <button type="submit" disabled={recoverySubmitting} className="w-full rounded-xl bg-amber-700 py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
+                  <button type="submit" disabled={recoverySubmitting} className="w-full rounded-xl bg-[#59683a] py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
                     {recoverySubmitting ? 'جارٍ تحديث كلمة المرور...' : 'تحديث كلمة مرور المالك'}
                   </button>
                 </form>
@@ -355,13 +355,13 @@ export const LoginView: React.FC = () => {
               </div>
 
               {regSuccessMessage ? (
-                <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-3 text-emerald-950">
+                <div className="p-5 rounded-2xl bg-[#f1f3e9] border border-[#dce2ca] space-y-3 text-[#3f4b2b]">
                   <div className="flex items-center gap-2 font-extrabold text-sm">
-                    <CheckCircle2 className="w-5 h-5 text-[#1B5E3A]" />
+                    <CheckCircle2 className="w-5 h-5 text-[#59683a]" />
                     <span>تم استلام طلب التسجيل بنجاح</span>
                   </div>
                   <p className="text-xs leading-relaxed">{regSuccessMessage}</p>
-                  <div className="flex items-center gap-2 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+                  <div className="flex items-center gap-2 text-[11px] font-bold text-[#59683a] bg-[#f1f3e9] border border-[#dce2ca] rounded-xl p-2.5">
                     <Clock className="w-4 h-4 shrink-0" />
                     <span>حالة الطلب الحالية: بانتظار موافقة مالك المنصة (PENDING_APPROVAL)</span>
                   </div>
@@ -371,7 +371,7 @@ export const LoginView: React.FC = () => {
                       setRegSuccessMessage('');
                       setAuthTab('login');
                     }}
-                    className="px-4 py-2 bg-[#1B5E3A] text-white text-xs font-bold rounded-xl"
+                    className="px-4 py-2 bg-[#59683a] text-white text-xs font-bold rounded-xl"
                   >
                     العودة إلى صفحة الدخول
                   </button>
@@ -392,7 +392,7 @@ export const LoginView: React.FC = () => {
                         value={regFullName}
                         onChange={(e) => setRegFullName(e.target.value)}
                         placeholder="أ. عبد الله محمد القفلي"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1B5E3A]"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#78884c]"
                       />
                     </div>
                     <div>
@@ -402,7 +402,7 @@ export const LoginView: React.FC = () => {
                         value={regUsername}
                         onChange={(e) => setRegUsername(e.target.value)}
                         placeholder="abdullah.q"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1B5E3A]"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#78884c]"
                         dir="ltr"
                       />
                     </div>
@@ -416,7 +416,7 @@ export const LoginView: React.FC = () => {
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
                         placeholder="6 أحرف على الأقل"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1B5E3A]"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#78884c]"
                         dir="ltr"
                       />
                     </div>
@@ -427,7 +427,7 @@ export const LoginView: React.FC = () => {
                         value={regConfirmPassword}
                         onChange={(e) => setRegConfirmPassword(e.target.value)}
                         placeholder="أعد كتابة كلمة المرور"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1B5E3A]"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#78884c]"
                         dir="ltr"
                       />
                     </div>
@@ -473,7 +473,7 @@ export const LoginView: React.FC = () => {
                               onClick={() => toggleItem(regSubjects, s.id, setRegSubjects)}
                               className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${
                                 regSubjects.includes(s.id)
-                                  ? 'bg-[#1B5E3A] text-white border-[#1B5E3A]'
+                                  ? 'bg-[#59683a] text-white border-[#59683a]'
                                   : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                               }`}
                             >
@@ -493,7 +493,7 @@ export const LoginView: React.FC = () => {
                               onClick={() => toggleItem(regGrades, g.value, setRegGrades)}
                               className={`px-2 py-1 rounded-lg border text-[11px] font-bold transition-colors ${
                                 regGrades.includes(g.value)
-                                  ? 'bg-slate-900 text-white border-slate-900'
+                                  ? 'bg-[#59683a] text-white border-[#59683a]'
                                   : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                               }`}
                             >
@@ -519,7 +519,7 @@ export const LoginView: React.FC = () => {
                   <button
                     type="submit"
                     disabled={regSubmitting}
-                    className="w-full py-3 bg-[#1B5E3A] hover:bg-[#144D2E] text-white font-extrabold text-sm rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                    className="w-full py-3 bg-[#59683a] hover:bg-[#46552b] text-white font-extrabold text-sm rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     <UserPlus className="w-4 h-4" />
                     <span>{regSubmitting ? 'جاري إرسال الطلب...' : 'إرسال طلب الحساب للموافقة'}</span>
