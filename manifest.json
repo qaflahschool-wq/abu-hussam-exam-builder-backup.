@@ -1,0 +1,73 @@
+{
+  "format": "ABU_HUSSAM_CLOUDFLARE_DEPLOY_ARTIFACT_V1",
+  "worker": {
+    "path": "worker.js",
+    "size": 247808,
+    "sha256": "cfc45f7ee67c0e69a7688a48fa08ae244aa3d5c54d326104ab823d7585743d54"
+  },
+  "assets": [
+    {
+      "path": "/assets/aistudio/1793675145730_f04991e4.jpg",
+      "storedPath": "assets-base64/assets/aistudio/1793675145730_f04991e4.jpg.b64",
+      "encoding": "base64",
+      "size": 307275,
+      "sha256": "f04991e412e7db0f479eabc80460cd442d586ca81cda0fb5dcb1e3c06f007983",
+      "md5": "03cee9c7099644752cf13ea3cae19e93",
+      "contentType": "image/jpeg"
+    },
+    {
+      "path": "/assets/aistudio/Screenshot_20261118_192217_824bcbcf.jpg",
+      "storedPath": "assets-base64/assets/aistudio/Screenshot_20261118_192217_824bcbcf.jpg.b64",
+      "encoding": "base64",
+      "size": 409223,
+      "sha256": "824bcbcfe8a5280523c64cdc8a98597ea89e93dc8532bd14354c23dc75b3990e",
+      "md5": "cd00bc16879b6798109d5e8226dabc98",
+      "contentType": "image/jpeg"
+    },
+    {
+      "path": "/assets/aistudio/Screenshot_20261118_192221_fbf93abc.jpg",
+      "storedPath": "assets-base64/assets/aistudio/Screenshot_20261118_192221_fbf93abc.jpg.b64",
+      "encoding": "base64",
+      "size": 316104,
+      "sha256": "fbf93abc55ec0a60cf8cae355a31db50d441857b63c0f6cfb814c37eafec835c",
+      "md5": "c3df2f25f00b73e561b02a54e7259efb",
+      "contentType": "image/jpeg"
+    },
+    {
+      "path": "/assets/index-CGnqlR3C.js",
+      "storedPath": "assets/assets/index-CGnqlR3C.js",
+      "encoding": "utf8",
+      "size": 766735,
+      "sha256": "b3f44dc9935c03e79a09dc6203c631372de175adcd8baa67e5dd539c668cf661",
+      "md5": "94210525c9d65ce1cbfc1522216a66ec",
+      "contentType": "application/javascript; charset=utf-8"
+    },
+    {
+      "path": "/assets/index-DGH9150V.css",
+      "storedPath": "assets/assets/index-DGH9150V.css",
+      "encoding": "utf8",
+      "size": 85680,
+      "sha256": "1281d18e4bf237918a7f277bd381d6c56f25037c37025ae86bdae2ac8a384304",
+      "md5": "f15858f0d8aaeac1fbfe14da933e29c9",
+      "contentType": "text/css; charset=utf-8"
+    },
+    {
+      "path": "/favicon.ico",
+      "storedPath": "assets-base64/favicon.ico.b64",
+      "encoding": "base64",
+      "size": 550028,
+      "sha256": "a2fdf7788a6db1ff56ecc4dfaaec26767e982097384ea691280d4622df2c30ba",
+      "md5": "17b12ebb6b47c0e416153320a1a11c3e",
+      "contentType": "image/x-icon"
+    },
+    {
+      "path": "/index.html",
+      "storedPath": "assets/index.html",
+      "encoding": "utf8",
+      "size": 1366,
+      "sha256": "78d19451d050b608d825ecad2d697c1f156619eb0750511ce6e1a902e1564f32",
+      "md5": "3a4d544c1d1dab3e0a12a4657fc2f792",
+      "contentType": "text/html; charset=utf-8"
+    }
+  ]
+}
