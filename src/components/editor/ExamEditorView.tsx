@@ -82,7 +82,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 
 async function inlineCssAssetUrls(css: string, stylesheetUrl: string): Promise<string> {
   // Match CSS url(...) tokens, including Google Fonts .woff2 resources.
-  const matches = Array.from(css.matchAll(/url\\((['"]?)([^'")]+)\\1\\)/g));
+  const matches = Array.from(css.matchAll(/url\((['"]?)([^'")]+)\1\)/g));
   let output = css;
   for (const match of matches) {
     const original = match[0];
@@ -99,9 +99,9 @@ async function inlineCssAssetUrls(css: string, stylesheetUrl: string): Promise<s
       const blob = await response.blob();
       if (!blob.size) continue;
       const dataUrl = await blobToDataUrl(blob);
-      output = output.replaceAll(original, `url("${dataUrl}")`);
+      output = output.replaceAll(original, \`url("\${dataUrl}")\`);
     } catch {
-      // Retain the declared font stack's local fallbacks if an asset disallows CORS.
+      // Retain local font fallbacks if an asset disallows CORS.
     }
   }
   return output;
@@ -181,19 +181,18 @@ async function buildPdfHeadStyles(): Promise<string> {
   const nodes = Array.from(document.head.querySelectorAll('link[rel="stylesheet"], style'));
   const rendered = await Promise.all(nodes.map(async (node) => {
     const media = node.getAttribute('media') || '';
-    if (media && /(?:^|,)\\s*(?:only\\s+)?print\\b/i.test(media)) return '';
+    if (media && /(?:^|,)\s*(?:only\s+)?print\b/i.test(media)) return '';
 
     if (node.tagName.toLowerCase() !== 'link') {
       const style = node as HTMLStyleElement;
       const css = stripPrintMediaRules(style.textContent || '');
-      return '<style>' + css.replace(/<\\/style/gi, '<\\\\/style') + '</style>';
+      return '<style>' + css.replace(/<\/style/gi, '<\\/style') + '</style>';
     }
 
     const href = (node as HTMLLinkElement).href;
     try {
       const url = new URL(href, window.location.href);
-      // Embed CORS-enabled remote stylesheets (notably Google Fonts), because
-      // the isolated Cloudflare PDF browser cannot fetch network resources.
+      // Embed CORS-enabled remote stylesheets (notably Google Fonts).
       const response = await fetch(url.href, {
         mode: 'cors',
         credentials: url.origin === window.location.origin ? 'same-origin' : 'omit',
@@ -201,13 +200,13 @@ async function buildPdfHeadStyles(): Promise<string> {
       if (!response.ok) return '';
       const sourceCss = await response.text();
       const css = stripPrintMediaRules(await inlineCssAssetUrls(sourceCss, url.href));
-      return '<style>' + css.replace(/<\\/style/gi, '<\\\\/style') + '</style>';
+      return '<style>' + css.replace(/<\/style/gi, '<\\/style') + '</style>';
     } catch {
-      // Keep system fallbacks if an optional stylesheet blocks cross-origin access.
+      // Local system font fallbacks remain available.
       return '';
     }
   }));
-  return rendered.filter(Boolean).join('\\n');
+  return rendered.filter(Boolean).join('\n');
 }
 async function buildPdfSheetsHtml(root: HTMLElement): Promise<string> {
   if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined);
