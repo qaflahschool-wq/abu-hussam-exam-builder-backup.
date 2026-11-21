@@ -71,13 +71,13 @@ function MainAppContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center" dir="rtl">
+      <div className="min-h-screen bg-[#F5F6F0] flex flex-col items-center justify-center p-6 text-center" dir="rtl">
         <img
           src={schoolIdentity?.logoUrl || '/assets/aistudio/1793675145730_f04991e4.jpg'}
           alt="شعار مدرسة قفلة"
           className="w-16 h-16 rounded-2xl object-contain mb-3 shadow-sm bg-white p-1"
         />
-        <div className="w-8 h-8 border-3 border-[#1B5E3A] border-t-transparent rounded-full animate-spin mb-2" />
+        <div className="w-8 h-8 border-3 border-[#59683A] border-t-transparent rounded-full animate-spin mb-2" />
         <p className="text-xs font-bold text-slate-600">جاري التحقق من الجلسة...</p>
       </div>
     );
