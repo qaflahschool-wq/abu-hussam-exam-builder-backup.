@@ -197,7 +197,7 @@ async function buildPdfHeadStyles(): Promise<string> {
       return '';
     }
   }));
-  return rendered.join('\\n');
+  return rendered.join('\n');
 }
 
 async function buildPdfSheetsHtml(root: HTMLElement): Promise<string> {
